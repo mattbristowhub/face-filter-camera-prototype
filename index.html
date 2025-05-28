@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Filter Camera - Preview Only</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            overflow: hidden;
+        }
+        
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            position: relative;
+        }
+        
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto;
+        }
+        
+        #video {
+            width: 100%;
+            height: auto;
+            transform: scaleX(-1);
+            display: block;
+        }
+        
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+            pointer-events: none;
+        }
+        
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            background: rgba(0,0,0,0.5);
+            padding: 15px 25px;
+            border-radius: 50px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .capture-btn {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background: #fff;
+            border: 5px solid #ddd;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        
+        .capture-btn:hover {
+            transform: scale(1.1);
+        }
+        
+        .capture-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .filter-selector {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .filter-btn {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 24px;
+            background: rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .filter-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .filter-btn.active {
+            background: rgba(255,255,255,0.3);
+            border-color: #4CAF50;
+        }
+        
+        .status {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            font-size: 14px;
+        }
+        
+        .preview-flash {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255,255,255,0.8);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .preview-flash.active {
+            opacity: 1;
+        }
+        
+        #capturedImage {
+            position: absolute;
+            bottom: 100px;
+            right: 20px;
+            width: 150px;
+            height: auto;
+            border: 3px solid #fff;
+            border-radius: 10px;
+            transform: scaleX(-1);
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        
+        #capturedImage.show {
+            opacity: 1;
+        }
+        
+        .info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(76, 175, 80, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            max-width: 250px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="camera-container">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="overlay"></canvas>
+            <div class="preview-flash"></div>
+            <img id="capturedImage" alt="Captured photo">
+        </div>
+        
+        <div class="status">
+            <span id="statusText">Initializing camera...</span>
+        </div>
+        
+        <div class="info">
+            💡 <strong>Preview-Only Filters!</strong><br>
+            Filters appear in preview but your saved photos remain unfiltered.
+        </div>
+        
+        <div class="controls">
+            <div class="filter-selector">
+                <button class="filter-btn active" data-filter="none">❌</button>
+                <button class="filter-btn" data-filter="sunglasses">🕶️</button>
+                <button class="filter-btn" data-filter="hearts">💕</button>
+                <button class="filter-btn" data-filter="party">🎉</button>
+                <button class="filter-btn" data-filter="mustache">👨</button>
+            </div>
+            <button class="capture-btn" id="captureBtn"></button>
+        </div>
+        
+        <div class="loading" id="loading">Loading face detection model...</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@0.0.3/dist/face-landmarks-detection.min.js"></script>
+    <script>
+        let video, overlay, ctx;
+        let model;
+        let currentFilter = 'none';
+        let isCapturing = false;
+        
+        const filterEffects = {
+            sunglasses: { emoji: '🕶️', scale: 2.5, yOffset: -0.1 },
+            hearts: { emoji: '💕', scale: 1.5, yOffset: -0.3, multiple: true },
+            party: { emoji: '🎉', scale: 2.0, yOffset: -0.4, multiple: true },
+            mustache: { emoji: '👨', scale: 1.2, yOffset: 0.15 }
+        };
+        
+        async function setupCamera() {
+            video = document.getElementById('video');
+            
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { 
+                    facingMode: 'user',
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                }
+            });
+            
+            video.srcObject = stream;
+            
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    resolve();
+                };
+            });
+        }
+        
+        async function loadModel() {
+            model = await faceLandmarksDetection.load(
+                faceLandmarksDetection.SupportedPackages.mediapipeFacemesh,
+                { maxFaces: 1 }
+            );
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('statusText').textContent = 'Ready! Filters appear in preview only.';
+        }
+        
+        function drawFilter(ctx, face) {
+            if (currentFilter === 'none' || !filterEffects[currentFilter]) return;
+            
+            const filter = filterEffects[currentFilter];
+            const mesh = face.scaledMesh;
+            
+            // Get key facial points
+            const noseTip = mesh[1];
+            const leftEye = mesh[33];
+            const rightEye = mesh[263];
+            const foreheadCenter = mesh[9];
+            
+            // Calculate face dimensions
+            const faceWidth = Math.abs(rightEye[0] - leftEye[0]);
+            const faceHeight = Math.abs(foreheadCenter[1] - noseTip[1]);
+            
+            ctx.save();
+            ctx.font = `${faceWidth * filter.scale}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            if (filter.multiple) {
+                // Draw multiple emojis around the face
+                const positions = [
+                    [leftEye[0] - faceWidth * 0.3, foreheadCenter[1] - faceHeight * 0.5],
+                    [rightEye[0] + faceWidth * 0.3, foreheadCenter[1] - faceHeight * 0.5],
+                    [noseTip[0], foreheadCenter[1] - faceHeight * 0.7]
+                ];
+                
+                positions.forEach(pos => {
+                    ctx.fillText(filter.emoji, pos[0], pos[1]);
+                });
+            } else {
+                // Draw single emoji at calculated position
+                let x = noseTip[0];
+                let y = noseTip[1] + (faceHeight * filter.yOffset);
+                
+                if (currentFilter === 'sunglasses') {
+                    x = (leftEye[0] + rightEye[0]) / 2;
+                    y = (leftEye[1] + rightEye[1]) / 2;
+                }
+                
+                ctx.fillText(filter.emoji, x, y);
+            }
+            
+            ctx.restore();
+        }
+        
+        async function detectAndDraw() {
+            if (!model || !video.videoWidth) return;
+            
+            const predictions = await model.estimateFaces({ input: video });
+            
+            ctx.clearRect(0, 0, overlay.width, overlay.height);
+            
+            if (predictions.length > 0 && !isCapturing) {
+                drawFilter(ctx, predictions[0]);
+            }
+            
+            requestAnimationFrame(detectAndDraw);
+        }
+        
+        function capturePhoto() {
+            if (isCapturing) return;
+            
+            isCapturing = true;
+            const flash = document.querySelector('.preview-flash');
+            flash.classList.add('active');
+            
+            // Create a temporary canvas to capture the video frame
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            // Draw only the video frame (no filter)
+            tempCtx.drawImage(video, 0, 0);
+            
+            // Convert to image
+            tempCanvas.toBlob((blob) => {
+                const url = URL.createObjectURL(blob);
+                const img = document.getElementById('capturedImage');
+                img.src = url;
+                img.classList.add('show');
+                
+                // Show notification
+                document.getElementById('statusText').textContent = 
+                    '✅ Photo saved without filter! (Preview still shows filter)';
+                
+                setTimeout(() => {
+                    flash.classList.remove('active');
+                    isCapturing = false;
+                    
+                    // Hide captured image after 3 seconds
+                    setTimeout(() => {
+                        img.classList.remove('show');
+                        document.getElementById('statusText').textContent = 
+                            'Ready! Filters appear in preview only.';
+                    }, 3000);
+                }, 300);
+            });
+        }
+        
+        async function init() {
+            try {
+                await setupCamera();
+                
+                overlay = document.getElementById('overlay');
+                overlay.width = video.videoWidth;
+                overlay.height = video.videoHeight;
+                ctx = overlay.getContext('2d');
+                
+                await loadModel();
+                detectAndDraw();
+                
+                // Setup filter buttons
+                document.querySelectorAll('.filter-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.querySelectorAll('.filter-btn').forEach(b => 
+                            b.classList.remove('active'));
+                        btn.classList.add('active');
+                        currentFilter = btn.dataset.filter;
+                    });
+                });
+                
+                // Setup capture button
+                document.getElementById('captureBtn').addEventListener('click', capturePhoto);
+                
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('statusText').textContent = 
+                    'Error: ' + error.message;
+            }
+        }
+        
+        init();
+    </script>
+</body>
+</html>
