@@ -189,17 +189,18 @@
         </div>
         
         <div class="info">
-            💡 <strong>Preview-Only Filters!</strong><br>
-            Filters appear in preview but your saved photos remain unfiltered.
+            💡 <strong>Multi-Face Fun Filters!</strong><br>
+            Filters work on multiple faces and appear in preview only. Your saved photos remain unfiltered.
         </div>
         
         <div class="controls">
             <div class="filter-selector">
                 <button class="filter-btn active" data-filter="none">❌</button>
-                <button class="filter-btn" data-filter="sunglasses">🕶️</button>
-                <button class="filter-btn" data-filter="hearts">💕</button>
-                <button class="filter-btn" data-filter="party">🎉</button>
-                <button class="filter-btn" data-filter="mustache">👨</button>
+                <button class="filter-btn" data-filter="cat">🐱</button>
+                <button class="filter-btn" data-filter="rainbow">🌈</button>
+                <button class="filter-btn" data-filter="butterfly">🦋</button>
+                <button class="filter-btn" data-filter="superhero">🦸</button>
+                <button class="filter-btn" data-filter="monster">👹</button>
             </div>
             <button class="capture-btn" id="captureBtn"></button>
         </div>
@@ -216,10 +217,35 @@
         let isCapturing = false;
         
         const filterEffects = {
-            sunglasses: { emoji: '🕶️', scale: 2.5, yOffset: -0.1 },
-            hearts: { emoji: '💕', scale: 1.5, yOffset: -0.3, multiple: true },
-            party: { emoji: '🎉', scale: 2.0, yOffset: -0.4, multiple: true },
-            mustache: { emoji: '👨', scale: 1.2, yOffset: 0.15 }
+            cat: { 
+                parts: [
+                    { emoji: '🐱', scale: 1.8, position: 'ears', yOffset: -0.6 },
+                    { emoji: '👃', scale: 0.8, position: 'nose', yOffset: 0.1, color: '#FFB6C1' }
+                ]
+            },
+            rainbow: { 
+                parts: [
+                    { emoji: '🌈', scale: 2.5, position: 'crown', yOffset: -0.8 }
+                ]
+            },
+            butterfly: { 
+                parts: [
+                    { emoji: '🦋', scale: 1.5, position: 'left_wing', xOffset: -0.8, yOffset: -0.2 },
+                    { emoji: '🦋', scale: 1.5, position: 'right_wing', xOffset: 0.8, yOffset: -0.2 }
+                ]
+            },
+            superhero: { 
+                parts: [
+                    { emoji: '🦸', scale: 2.0, position: 'eyes', yOffset: -0.1 },
+                    { emoji: '✨', scale: 1.0, position: 'sparkles', multiple: true }
+                ]
+            },
+            monster: { 
+                parts: [
+                    { emoji: '👀', scale: 1.5, position: 'eyes', yOffset: -0.2 },
+                    { emoji: '👹', scale: 1.2, position: 'mouth', yOffset: 0.3 }
+                ]
+            }
         };
         
         async function setupCamera() {
@@ -245,10 +271,10 @@
         async function loadModel() {
             model = await faceLandmarksDetection.load(
                 faceLandmarksDetection.SupportedPackages.mediapipeFacemesh,
-                { maxFaces: 1 }
+                { maxFaces: 5 }
             );
             document.getElementById('loading').style.display = 'none';
-            document.getElementById('statusText').textContent = 'Ready! Filters appear in preview only.';
+            document.getElementById('statusText').textContent = 'Ready! Multi-face filters active - preview only.';
         }
         
         function drawFilter(ctx, face) {
@@ -262,39 +288,74 @@
             const leftEye = mesh[33];
             const rightEye = mesh[263];
             const foreheadCenter = mesh[9];
+            const leftMouth = mesh[61];
+            const rightMouth = mesh[291];
             
             // Calculate face dimensions
             const faceWidth = Math.abs(rightEye[0] - leftEye[0]);
             const faceHeight = Math.abs(foreheadCenter[1] - noseTip[1]);
+            const eyeCenter = [(leftEye[0] + rightEye[0]) / 2, (leftEye[1] + rightEye[1]) / 2];
             
             ctx.save();
-            ctx.font = `${faceWidth * filter.scale}px Arial`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             
-            if (filter.multiple) {
-                // Draw multiple emojis around the face
-                const positions = [
-                    [leftEye[0] - faceWidth * 0.3, foreheadCenter[1] - faceHeight * 0.5],
-                    [rightEye[0] + faceWidth * 0.3, foreheadCenter[1] - faceHeight * 0.5],
-                    [noseTip[0], foreheadCenter[1] - faceHeight * 0.7]
-                ];
+            filter.parts.forEach(part => {
+                ctx.font = `${faceWidth * part.scale}px Arial`;
                 
-                positions.forEach(pos => {
-                    ctx.fillText(filter.emoji, pos[0], pos[1]);
-                });
-            } else {
-                // Draw single emoji at calculated position
-                let x = noseTip[0];
-                let y = noseTip[1] + (faceHeight * filter.yOffset);
+                let x, y;
                 
-                if (currentFilter === 'sunglasses') {
-                    x = (leftEye[0] + rightEye[0]) / 2;
-                    y = (leftEye[1] + rightEye[1]) / 2;
+                switch (part.position) {
+                    case 'ears':
+                        x = eyeCenter[0];
+                        y = foreheadCenter[1] + (faceHeight * part.yOffset);
+                        break;
+                    case 'nose':
+                        x = noseTip[0];
+                        y = noseTip[1] + (faceHeight * part.yOffset);
+                        break;
+                    case 'crown':
+                        x = eyeCenter[0];
+                        y = foreheadCenter[1] + (faceHeight * part.yOffset);
+                        break;
+                    case 'left_wing':
+                        x = leftEye[0] + (faceWidth * part.xOffset);
+                        y = eyeCenter[1] + (faceHeight * part.yOffset);
+                        break;
+                    case 'right_wing':
+                        x = rightEye[0] + (faceWidth * part.xOffset);
+                        y = eyeCenter[1] + (faceHeight * part.yOffset);
+                        break;
+                    case 'eyes':
+                        x = eyeCenter[0];
+                        y = eyeCenter[1] + (faceHeight * part.yOffset);
+                        break;
+                    case 'mouth':
+                        x = (leftMouth[0] + rightMouth[0]) / 2;
+                        y = (leftMouth[1] + rightMouth[1]) / 2 + (faceHeight * part.yOffset);
+                        break;
+                    case 'sparkles':
+                        // Multiple sparkles around the face
+                        const sparklePositions = [
+                            [leftEye[0] - faceWidth * 0.3, eyeCenter[1] - faceHeight * 0.3],
+                            [rightEye[0] + faceWidth * 0.3, eyeCenter[1] - faceHeight * 0.3],
+                            [noseTip[0] - faceWidth * 0.2, noseTip[1] - faceHeight * 0.2],
+                            [noseTip[0] + faceWidth * 0.2, noseTip[1] - faceHeight * 0.2]
+                        ];
+                        
+                        sparklePositions.forEach(pos => {
+                            ctx.fillText(part.emoji, pos[0], pos[1]);
+                        });
+                        return;
+                    default:
+                        x = noseTip[0];
+                        y = noseTip[1];
                 }
                 
-                ctx.fillText(filter.emoji, x, y);
-            }
+                if (part.position !== 'sparkles') {
+                    ctx.fillText(part.emoji, x, y);
+                }
+            });
             
             ctx.restore();
         }
@@ -307,7 +368,9 @@
             ctx.clearRect(0, 0, overlay.width, overlay.height);
             
             if (predictions.length > 0 && !isCapturing) {
-                drawFilter(ctx, predictions[0]);
+                predictions.forEach(face => {
+                    drawFilter(ctx, face);
+                });
             }
             
             requestAnimationFrame(detectAndDraw);
@@ -338,7 +401,7 @@
                 
                 // Show notification
                 document.getElementById('statusText').textContent = 
-                    '✅ Photo saved without filter! (Preview still shows filter)';
+                    '✅ Photo saved without filters! (Preview still shows filters)';
                 
                 setTimeout(() => {
                     flash.classList.remove('active');
@@ -348,7 +411,7 @@
                     setTimeout(() => {
                         img.classList.remove('show');
                         document.getElementById('statusText').textContent = 
-                            'Ready! Filters appear in preview only.';
+                            'Ready! Multi-face filters active - preview only.';
                     }, 3000);
                 }, 300);
             });
