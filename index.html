@@ -189,18 +189,19 @@
         </div>
         
         <div class="info">
-            💡 <strong>Multi-Face Fun Filters!</strong><br>
-            Filters work on multiple faces and appear in preview only. Your saved photos remain unfiltered.
+            💡 <strong>Animated Attention Filters!</strong><br>
+            Interactive filters designed for children & pets. Work on multiple faces in preview only. Photos save unfiltered.
         </div>
         
         <div class="controls">
             <div class="filter-selector">
                 <button class="filter-btn active" data-filter="none">❌</button>
-                <button class="filter-btn" data-filter="cat">🐱</button>
-                <button class="filter-btn" data-filter="rainbow">🌈</button>
-                <button class="filter-btn" data-filter="butterfly">🦋</button>
-                <button class="filter-btn" data-filter="superhero">🦸</button>
-                <button class="filter-btn" data-filter="monster">👹</button>
+                <button class="filter-btn" data-filter="bouncing_balls">⚽</button>
+                <button class="filter-btn" data-filter="twinkling_stars">⭐</button>
+                <button class="filter-btn" data-filter="floating_hearts">💕</button>
+                <button class="filter-btn" data-filter="pet_dots">🔴</button>
+                <button class="filter-btn" data-filter="prey_fish">🐟</button>
+                <button class="filter-btn" data-filter="sparkle_burst">✨</button>
             </div>
             <button class="capture-btn" id="captureBtn"></button>
         </div>
@@ -216,34 +217,60 @@
         let currentFilter = 'none';
         let isCapturing = false;
         
+        let animationTime = 0;
+        let particles = [];
+        let lastFrameTime = 0;
+        let frameCount = 0;
+        let fps = 0;
+        
         const filterEffects = {
-            cat: { 
+            bouncing_balls: {
+                type: 'animated',
+                name: 'Bouncing Balls',
                 parts: [
-                    { emoji: '🐱', scale: 1.8, position: 'ears', yOffset: -0.6 },
-                    { emoji: '👃', scale: 0.8, position: 'nose', yOffset: 0.1, color: '#FFB6C1' }
+                    { type: 'bouncing_ball', position: 'left_eye', color: '#FF6B6B', size: 0.3 },
+                    { type: 'bouncing_ball', position: 'right_eye', color: '#4ECDC4', size: 0.3 },
+                    { type: 'bouncing_ball', position: 'nose', color: '#45B7D1', size: 0.25 }
                 ]
             },
-            rainbow: { 
+            twinkling_stars: {
+                type: 'animated',
+                name: 'Twinkling Stars',
                 parts: [
-                    { emoji: '🌈', scale: 2.5, position: 'crown', yOffset: -0.8 }
+                    { type: 'twinkling_star', position: 'crown', color: '#FFD93D', size: 0.4 },
+                    { type: 'twinkling_star', position: 'left_cheek', color: '#6BCF7F', size: 0.3 },
+                    { type: 'twinkling_star', position: 'right_cheek', color: '#4D96FF', size: 0.3 }
                 ]
             },
-            butterfly: { 
+            floating_hearts: {
+                type: 'animated',
+                name: 'Floating Hearts',
                 parts: [
-                    { emoji: '🦋', scale: 1.5, position: 'left_wing', xOffset: -0.8, yOffset: -0.2 },
-                    { emoji: '🦋', scale: 1.5, position: 'right_wing', xOffset: 0.8, yOffset: -0.2 }
+                    { type: 'floating_heart', position: 'around_face', color: '#FF69B4', size: 0.2, count: 6 }
                 ]
             },
-            superhero: { 
+            pet_dots: {
+                type: 'animated',
+                name: 'Moving Dots (Pet)',
                 parts: [
-                    { emoji: '🦸', scale: 2.0, position: 'eyes', yOffset: -0.1 },
-                    { emoji: '✨', scale: 1.0, position: 'sparkles', multiple: true }
+                    { type: 'moving_dot', position: 'random_orbit', color: '#FF0000', size: 0.15, speed: 2 },
+                    { type: 'moving_dot', position: 'random_orbit', color: '#00FF00', size: 0.12, speed: 1.5 },
+                    { type: 'moving_dot', position: 'random_orbit', color: '#0000FF', size: 0.18, speed: 1.8 }
                 ]
             },
-            monster: { 
+            prey_fish: {
+                type: 'animated',
+                name: 'Swimming Fish (Pet)',
                 parts: [
-                    { emoji: '👀', scale: 1.5, position: 'eyes', yOffset: -0.2 },
-                    { emoji: '👹', scale: 1.2, position: 'mouth', yOffset: 0.3 }
+                    { type: 'swimming_fish', position: 'horizontal_swim', color: '#FF8C00', size: 0.3, speed: 1.2 },
+                    { type: 'swimming_fish', position: 'horizontal_swim', color: '#32CD32', size: 0.25, speed: 0.8 }
+                ]
+            },
+            sparkle_burst: {
+                type: 'particle',
+                name: 'Sparkle Burst',
+                parts: [
+                    { type: 'particle_burst', position: 'nose', particleType: 'sparkle', color: '#FFD700', count: 8 }
                 ]
             }
         };
@@ -277,83 +304,241 @@
             document.getElementById('statusText').textContent = 'Ready! Multi-face filters active - preview only.';
         }
         
+        function getFacePoints(face) {
+            const mesh = face.scaledMesh;
+            return {
+                noseTip: mesh[1],
+                leftEye: mesh[33],
+                rightEye: mesh[263],
+                foreheadCenter: mesh[9],
+                leftMouth: mesh[61],
+                rightMouth: mesh[291],
+                leftCheek: mesh[116],
+                rightCheek: mesh[345]
+            };
+        }
+        
+        function getFaceDimensions(points) {
+            const faceWidth = Math.abs(points.rightEye[0] - points.leftEye[0]);
+            const faceHeight = Math.abs(points.foreheadCenter[1] - points.noseTip[1]);
+            const eyeCenter = [(points.leftEye[0] + points.rightEye[0]) / 2, (points.leftEye[1] + points.rightEye[1]) / 2];
+            return { faceWidth, faceHeight, eyeCenter };
+        }
+        
+        function drawBouncingBall(ctx, x, y, size, color, time) {
+            const bounce = Math.abs(Math.sin(time * 3)) * 20;
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.arc(x, y - bounce, size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+        
+        function drawTwinklingStar(ctx, x, y, size, color, time) {
+            const twinkle = 0.5 + 0.5 * Math.sin(time * 4);
+            const points = 5;
+            const outerRadius = size * twinkle;
+            const innerRadius = size * 0.5 * twinkle;
+            
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 8 * twinkle;
+            ctx.beginPath();
+            ctx.translate(x, y);
+            ctx.rotate(time * 0.5);
+            
+            for (let i = 0; i < points * 2; i++) {
+                const radius = i % 2 === 0 ? outerRadius : innerRadius;
+                const angle = (i * Math.PI) / points;
+                const px = Math.cos(angle) * radius;
+                const py = Math.sin(angle) * radius;
+                
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+        
+        function drawFloatingHeart(ctx, x, y, size, color, time, offset) {
+            const float = Math.sin(time * 2 + offset) * 15;
+            const scale = 0.8 + 0.2 * Math.sin(time * 3 + offset);
+            const heartSize = size * scale;
+            
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 8;
+            ctx.translate(x, y + float);
+            ctx.scale(heartSize, heartSize);
+            
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.bezierCurveTo(-0.5, -0.5, -1, -0.2, -0.5, 0.2);
+            ctx.bezierCurveTo(0, 0.8, 0, 0.8, 0, 0.8);
+            ctx.bezierCurveTo(0, 0.8, 0, 0.8, 0.5, 0.2);
+            ctx.bezierCurveTo(1, -0.2, 0.5, -0.5, 0, 0);
+            ctx.fill();
+            ctx.restore();
+        }
+        
+        function drawMovingDot(ctx, centerX, centerY, size, color, time, speed, faceWidth) {
+            const radius = faceWidth * 0.6;
+            const angle = time * speed;
+            const x = centerX + Math.cos(angle) * radius;
+            const y = centerY + Math.sin(angle) * radius * 0.7;
+            
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.arc(x, y, size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+        
+        function drawSwimmingFish(ctx, x, y, size, color, time, speed, faceWidth) {
+            const swimX = x + Math.sin(time * speed) * faceWidth * 0.8;
+            const swimY = y + Math.cos(time * speed * 0.7) * 20;
+            const fishSize = size * (0.8 + 0.2 * Math.sin(time * 2));
+            
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 10;
+            ctx.translate(swimX, swimY);
+            ctx.scale(fishSize, fishSize);
+            
+            // Fish body
+            ctx.beginPath();
+            ctx.ellipse(0, 0, 30, 15, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Fish tail
+            ctx.beginPath();
+            ctx.moveTo(-25, 0);
+            ctx.lineTo(-40, -10);
+            ctx.lineTo(-40, 10);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Fish eye
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(10, -5, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore();
+        }
+        
+        function drawParticleBurst(ctx, x, y, time, color, count) {
+            for (let i = 0; i < count; i++) {
+                const angle = (i / count) * Math.PI * 2;
+                const distance = 30 + Math.sin(time * 3) * 20;
+                const px = x + Math.cos(angle) * distance;
+                const py = y + Math.sin(angle) * distance;
+                const sparkleSize = 3 + Math.sin(time * 4 + i) * 2;
+                
+                ctx.save();
+                ctx.fillStyle = color;
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 8;
+                ctx.beginPath();
+                ctx.arc(px, py, sparkleSize, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+        
         function drawFilter(ctx, face) {
             if (currentFilter === 'none' || !filterEffects[currentFilter]) return;
             
             const filter = filterEffects[currentFilter];
-            const mesh = face.scaledMesh;
-            
-            // Get key facial points
-            const noseTip = mesh[1];
-            const leftEye = mesh[33];
-            const rightEye = mesh[263];
-            const foreheadCenter = mesh[9];
-            const leftMouth = mesh[61];
-            const rightMouth = mesh[291];
-            
-            // Calculate face dimensions
-            const faceWidth = Math.abs(rightEye[0] - leftEye[0]);
-            const faceHeight = Math.abs(foreheadCenter[1] - noseTip[1]);
-            const eyeCenter = [(leftEye[0] + rightEye[0]) / 2, (leftEye[1] + rightEye[1]) / 2];
+            const points = getFacePoints(face);
+            const { faceWidth, faceHeight, eyeCenter } = getFaceDimensions(points);
             
             ctx.save();
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
             
-            filter.parts.forEach(part => {
-                ctx.font = `${faceWidth * part.scale}px Arial`;
-                
+            filter.parts.forEach((part, index) => {
                 let x, y;
                 
                 switch (part.position) {
-                    case 'ears':
-                        x = eyeCenter[0];
-                        y = foreheadCenter[1] + (faceHeight * part.yOffset);
+                    case 'left_eye':
+                        x = points.leftEye[0];
+                        y = points.leftEye[1];
+                        break;
+                    case 'right_eye':
+                        x = points.rightEye[0];
+                        y = points.rightEye[1];
                         break;
                     case 'nose':
-                        x = noseTip[0];
-                        y = noseTip[1] + (faceHeight * part.yOffset);
+                        x = points.noseTip[0];
+                        y = points.noseTip[1];
                         break;
                     case 'crown':
                         x = eyeCenter[0];
-                        y = foreheadCenter[1] + (faceHeight * part.yOffset);
+                        y = points.foreheadCenter[1] - faceHeight * 0.5;
                         break;
-                    case 'left_wing':
-                        x = leftEye[0] + (faceWidth * part.xOffset);
-                        y = eyeCenter[1] + (faceHeight * part.yOffset);
+                    case 'left_cheek':
+                        x = points.leftCheek[0];
+                        y = points.leftCheek[1];
                         break;
-                    case 'right_wing':
-                        x = rightEye[0] + (faceWidth * part.xOffset);
-                        y = eyeCenter[1] + (faceHeight * part.yOffset);
+                    case 'right_cheek':
+                        x = points.rightCheek[0];
+                        y = points.rightCheek[1];
                         break;
-                    case 'eyes':
-                        x = eyeCenter[0];
-                        y = eyeCenter[1] + (faceHeight * part.yOffset);
-                        break;
-                    case 'mouth':
-                        x = (leftMouth[0] + rightMouth[0]) / 2;
-                        y = (leftMouth[1] + rightMouth[1]) / 2 + (faceHeight * part.yOffset);
-                        break;
-                    case 'sparkles':
-                        // Multiple sparkles around the face
-                        const sparklePositions = [
-                            [leftEye[0] - faceWidth * 0.3, eyeCenter[1] - faceHeight * 0.3],
-                            [rightEye[0] + faceWidth * 0.3, eyeCenter[1] - faceHeight * 0.3],
-                            [noseTip[0] - faceWidth * 0.2, noseTip[1] - faceHeight * 0.2],
-                            [noseTip[0] + faceWidth * 0.2, noseTip[1] - faceHeight * 0.2]
+                    case 'around_face':
+                        // Multiple floating hearts
+                        const heartPositions = [
+                            [eyeCenter[0] - faceWidth * 0.6, eyeCenter[1] - faceHeight * 0.3],
+                            [eyeCenter[0] + faceWidth * 0.6, eyeCenter[1] - faceHeight * 0.3],
+                            [eyeCenter[0] - faceWidth * 0.8, eyeCenter[1] + faceHeight * 0.2],
+                            [eyeCenter[0] + faceWidth * 0.8, eyeCenter[1] + faceHeight * 0.2],
+                            [eyeCenter[0], eyeCenter[1] - faceHeight * 0.8],
+                            [eyeCenter[0], eyeCenter[1] + faceHeight * 0.6]
                         ];
                         
-                        sparklePositions.forEach(pos => {
-                            ctx.fillText(part.emoji, pos[0], pos[1]);
+                        heartPositions.forEach((pos, i) => {
+                            drawFloatingHeart(ctx, pos[0], pos[1], faceWidth * part.size, part.color, animationTime, i);
                         });
                         return;
+                    case 'random_orbit':
+                        x = eyeCenter[0];
+                        y = eyeCenter[1];
+                        break;
+                    case 'horizontal_swim':
+                        x = eyeCenter[0];
+                        y = eyeCenter[1] + (index * 40 - 20);
+                        break;
                     default:
-                        x = noseTip[0];
-                        y = noseTip[1];
+                        x = eyeCenter[0];
+                        y = eyeCenter[1];
                 }
                 
-                if (part.position !== 'sparkles') {
-                    ctx.fillText(part.emoji, x, y);
+                const size = faceWidth * part.size;
+                
+                switch (part.type) {
+                    case 'bouncing_ball':
+                        drawBouncingBall(ctx, x, y, size, part.color, animationTime);
+                        break;
+                    case 'twinkling_star':
+                        drawTwinklingStar(ctx, x, y, size, part.color, animationTime);
+                        break;
+                    case 'moving_dot':
+                        drawMovingDot(ctx, x, y, size, part.color, animationTime, part.speed, faceWidth);
+                        break;
+                    case 'swimming_fish':
+                        drawSwimmingFish(ctx, x, y, part.size, part.color, animationTime, part.speed, faceWidth);
+                        break;
+                    case 'particle_burst':
+                        drawParticleBurst(ctx, x, y, animationTime, part.color, part.count);
+                        break;
                 }
             });
             
@@ -362,6 +547,21 @@
         
         async function detectAndDraw() {
             if (!model || !video.videoWidth) return;
+            
+            const currentTime = performance.now();
+            const deltaTime = currentTime - lastFrameTime;
+            lastFrameTime = currentTime;
+            
+            // Calculate FPS
+            frameCount++;
+            if (frameCount % 30 === 0) {
+                fps = Math.round(1000 / deltaTime);
+            }
+            
+            // Adaptive animation speed based on performance
+            const targetFPS = 30;
+            const speedMultiplier = Math.min(1, targetFPS / Math.max(fps, 1));
+            animationTime += 0.05 * speedMultiplier;
             
             const predictions = await model.estimateFaces({ input: video });
             
