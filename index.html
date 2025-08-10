@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Face Filter Camera - Preview Only</title>
     <style>
         body {
@@ -57,6 +57,7 @@
             align-items: center;
             background: rgba(0,0,0,0.5);
             padding: 15px 25px;
+            padding-bottom: calc(15px + env(safe-area-inset-bottom));
             border-radius: 50px;
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
@@ -628,23 +629,18 @@
         
         async function loadModel() {
             try {
-                // Safari-specific backend configuration
-                if (isSafari) {
-                    console.log('Configuring TensorFlow.js for Safari...');
-                    
-                    // Force WebGL backend for Safari if available, fall back to CPU
-                    try {
-                        await tf.setBackend('webgl');
-                        console.log('Using WebGL backend for Safari');
-                    } catch (webglError) {
-                        console.warn('WebGL not available, falling back to CPU:', webglError);
-                        await tf.setBackend('cpu');
-                    }
-                    
-                    // Wait for backend to initialize
-                    await tf.ready();
+                // Explicitly set the backend
+                try {
+                    await tf.setBackend('webgl');
+                    console.log('Using WebGL backend');
+                } catch (e) {
+                    console.warn('WebGL is not supported, falling back to CPU');
+                    await tf.setBackend('cpu');
                 }
-                
+
+                // Wait for the backend to be ready
+                await tf.ready();
+
                 // Adjust model settings based on device performance
                 const quality = getQualitySettings();
                 let maxFaces;
@@ -1121,7 +1117,7 @@
                 overlay = document.getElementById('overlay');
                 overlay.width = video.videoWidth;
                 overlay.height = video.videoHeight;
-                ctx = overlay.getContext('2d');
+                ctx = overlay.getContext('2d', { willReadFrequently: true });
                 
                 // Safari-specific canvas optimizations
                 if (isSafari) {
