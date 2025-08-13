@@ -386,6 +386,40 @@
         let performanceLevel = 'high'; // high, medium, low
         let adaptiveQuality = true;
         
+        // Performance optimization variables
+        let lastFaces = [];
+        let facePositions = [];
+        let skipFrameCounter = 0;
+        let dynamicSkipInterval = 1;
+        let cachedFaces = null;
+        let faceMovementThreshold = 10;
+        let consecutiveStableFrames = 0;
+        let tensorsToDispose = [];
+        let memoryPressureLevel = 0;
+        
+        // Pre-calculated math lookup tables
+        const sinLookup = [];
+        const cosLookup = [];
+        const LOOKUP_SIZE = 360;
+        for (let i = 0; i < LOOKUP_SIZE; i++) {
+            const rad = (i * Math.PI * 2) / LOOKUP_SIZE;
+            sinLookup[i] = Math.sin(rad);
+            cosLookup[i] = Math.cos(rad);
+        }
+        
+        // Canvas optimization variables
+        let lastCanvasWidth = 0;
+        let lastCanvasHeight = 0;
+        let dirtyRegions = [];
+        let offscreenCanvas = null;
+        let offscreenCtx = null;
+        
+        // Web Worker variables
+        let useWebWorker = false;
+        let detectionWorker = null;
+        let workerBusy = false;
+        let pendingDetection = false;
+        
         // Browser compatibility polyfills
         if (!window.requestAnimationFrame) {
             window.requestAnimationFrame = window.webkitRequestAnimationFrame || 
@@ -420,23 +454,179 @@
             };
         }
         
-        // Performance detection function
+        // Memory management functions
+        function manageTensorMemory() {
+            const memInfo = tf.memory();
+            memoryPressureLevel = memInfo.numTensors > 50 ? 2 : (memInfo.numTensors > 25 ? 1 : 0);
+            
+            if (memoryPressureLevel > 0) {
+                // Dispose accumulated tensors
+                tensorsToDispose.forEach(tensor => {
+                    if (tensor && !tensor.isDisposed) {
+                        tensor.dispose();
+                    }
+                });
+                tensorsToDispose = [];
+                
+                // Force garbage collection on high pressure
+                if (memoryPressureLevel > 1) {
+                    tf.disposeVariables();
+                    if (tf.engine) {
+                        tf.engine().startScope();
+                        tf.engine().endScope();
+                    }
+                }
+            }
+        }
+        
+        // Face tracking and prediction functions
+        function calculateFaceMovement(newFaces, oldFaces) {
+            if (!oldFaces.length || !newFaces.length) return Infinity;
+            
+            let totalMovement = 0;
+            let pairCount = 0;
+            
+            for (let i = 0; i < Math.min(newFaces.length, oldFaces.length); i++) {
+                const newPoints = getFacePoints(newFaces[i]);
+                const oldPoints = getFacePoints(oldFaces[i]);
+                
+                const centerMovement = Math.sqrt(
+                    Math.pow(newPoints.noseTip[0] - oldPoints.noseTip[0], 2) +
+                    Math.pow(newPoints.noseTip[1] - oldPoints.noseTip[1], 2)
+                );
+                
+                totalMovement += centerMovement;
+                pairCount++;
+            }
+            
+            return pairCount > 0 ? totalMovement / pairCount : Infinity;
+        }
+        
+        function interpolateFaces(faces, progress) {
+            if (!cachedFaces || !faces.length) return faces;
+            
+            return faces.map((face, index) => {
+                if (index >= cachedFaces.length) return face;
+                
+                const cached = cachedFaces[index];
+                const current = face;
+                
+                // Simple interpolation for smooth animation
+                const interpolated = {
+                    ...current,
+                    scaledMesh: current.scaledMesh.map((point, pointIndex) => {
+                        if (pointIndex >= cached.scaledMesh.length) return point;
+                        const cachedPoint = cached.scaledMesh[pointIndex];
+                        return [
+                            cachedPoint[0] + (point[0] - cachedPoint[0]) * progress,
+                            cachedPoint[1] + (point[1] - cachedPoint[1]) * progress,
+                            cachedPoint[2] + (point[2] - cachedPoint[2]) * progress
+                        ];
+                    })
+                };
+                
+                return interpolated;
+            });
+        }
+        
+        // Optimized math functions using lookup tables
+        function fastSin(angle) {
+            const index = Math.floor(((angle % (Math.PI * 2)) / (Math.PI * 2)) * LOOKUP_SIZE);
+            return sinLookup[Math.max(0, Math.min(LOOKUP_SIZE - 1, index))];
+        }
+        
+        function fastCos(angle) {
+            const index = Math.floor(((angle % (Math.PI * 2)) / (Math.PI * 2)) * LOOKUP_SIZE);
+            return cosLookup[Math.max(0, Math.min(LOOKUP_SIZE - 1, index))];
+        }
+        
+        // Canvas optimization functions
+        function initOffscreenCanvas() {
+            if (!offscreenCanvas) {
+                offscreenCanvas = document.createElement('canvas');
+                offscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: false });
+            }
+        }
+        
+        function isInViewport(x, y, radius, canvasWidth, canvasHeight) {
+            return x + radius >= 0 && x - radius <= canvasWidth && 
+                   y + radius >= 0 && y - radius <= canvasHeight;
+        }
+        
+        function shouldCullAnimation(face, canvasWidth, canvasHeight) {
+            const points = getFacePoints(face);
+            const { faceWidth } = getFaceDimensions(points);
+            const maxRadius = faceWidth * 0.8; // Maximum possible filter radius
+            
+            // Check if any part of the face area is visible
+            return !isInViewport(points.noseTip[0], points.noseTip[1], maxRadius, canvasWidth, canvasHeight);
+        }
+        
+        // Web Worker support functions
+        function initWebWorker() {
+            if (typeof Worker === 'undefined' || isSafari) {
+                console.log('Web Workers not supported or disabled for Safari');
+                return false;
+            }
+            
+            try {
+                // For now, we'll use a simple fallback approach since creating a separate worker file
+                // would require additional setup. In a production environment, you'd create a separate worker file.
+                console.log('Web Worker support detected but using main thread for compatibility');
+                return false;
+            } catch (error) {
+                console.warn('Failed to initialize Web Worker:', error);
+                return false;
+            }
+        }
+        
+        async function detectFacesWithWorker(videoData) {
+            // Placeholder for worker-based detection
+            // In a full implementation, this would send video data to worker
+            // and receive face detection results asynchronously
+            return null;
+        }
+        
+        // Performance detection function with caching
         function detectPerformance() {
+            // Check if we have cached performance data
+            const cacheKey = 'faceFilterPerformance';
+            const cached = localStorage.getItem(cacheKey);
+            
+            if (cached) {
+                try {
+                    const { level, timestamp, userAgent } = JSON.parse(cached);
+                    // Cache is valid for 24 hours and same user agent
+                    if (Date.now() - timestamp < 24 * 60 * 60 * 1000 && userAgent === navigator.userAgent) {
+                        performanceLevel = level;
+                        console.log(`Using cached performance level: ${performanceLevel}`);
+                        return performanceLevel;
+                    }
+                } catch (e) {
+                    // Invalid cache, continue with detection
+                }
+            }
+            
             const startTime = performance.now();
             
-            // Simple performance test
+            // Optimized performance test
             let testResult = 0;
-            for (let i = 0; i < 100000; i++) {
-                testResult += Math.random() * Math.sin(i);
+            const iterations = isMobile ? 50000 : 100000; // Fewer iterations on mobile
+            for (let i = 0; i < iterations; i++) {
+                testResult += Math.random() * fastSin(i * 0.01);
             }
             
             const endTime = performance.now();
             const testDuration = endTime - startTime;
             
+            // Adjust thresholds for mobile devices
+            const highThreshold = isMobile ? 15 : 10;
+            const mediumThreshold = isMobile ? 40 : 30;
+            
             // Estimate performance level
-            if (testDuration < 10) {
+            if (testDuration < highThreshold) {
                 performanceLevel = 'high';
-            } else if (testDuration < 30) {
+            } else if (testDuration < mediumThreshold) {
                 performanceLevel = 'medium';
             } else {
                 performanceLevel = 'low';
@@ -469,42 +659,61 @@
                 if (performanceLevel === 'high') performanceLevel = 'medium';
             }
             
+            // Cache the result
+            try {
+                localStorage.setItem(cacheKey, JSON.stringify({
+                    level: performanceLevel,
+                    timestamp: Date.now(),
+                    userAgent: navigator.userAgent
+                }));
+            } catch (e) {
+                // localStorage might not be available
+                console.warn('Could not cache performance data:', e);
+            }
+            
             console.log(`Final performance level: ${performanceLevel} (Safari: ${isSafari}, iOS: ${isIOS})`);
             return performanceLevel;
         }
         
         // Adaptive quality settings
         function getQualitySettings() {
-            switch (performanceLevel) {
-                case 'high':
-                    return {
-                        shadowBlur: 10,
-                        animationSpeed: 1.0,
-                        particleCount: 8,
-                        detectionInterval: 1
-                    };
-                case 'medium':
-                    return {
-                        shadowBlur: 6,
-                        animationSpeed: 0.8,
-                        particleCount: 5,
-                        detectionInterval: 2
-                    };
-                case 'low':
-                    return {
-                        shadowBlur: 3,
-                        animationSpeed: 0.6,
-                        particleCount: 3,
-                        detectionInterval: 3
-                    };
-                default:
-                    return {
-                        shadowBlur: 8,
-                        animationSpeed: 1.0,
-                        particleCount: 6,
-                        detectionInterval: 1
-                    };
+            const baseSettings = {
+                'high': {
+                    shadowBlur: 10,
+                    animationSpeed: 1.0,
+                    particleCount: 8,
+                    detectionInterval: 1,
+                    maxSkipFrames: 2,
+                    memoryCleanupInterval: 60
+                },
+                'medium': {
+                    shadowBlur: 6,
+                    animationSpeed: 0.8,
+                    particleCount: 5,
+                    detectionInterval: 2,
+                    maxSkipFrames: 3,
+                    memoryCleanupInterval: 40
+                },
+                'low': {
+                    shadowBlur: 3,
+                    animationSpeed: 0.6,
+                    particleCount: 3,
+                    detectionInterval: 3,
+                    maxSkipFrames: 5,
+                    memoryCleanupInterval: 20
+                }
+            };
+            
+            const settings = baseSettings[performanceLevel] || baseSettings['high'];
+            
+            // Adjust settings based on memory pressure
+            if (memoryPressureLevel > 0) {
+                settings.detectionInterval = Math.min(settings.detectionInterval + memoryPressureLevel, 5);
+                settings.particleCount = Math.max(settings.particleCount - memoryPressureLevel, 1);
+                settings.shadowBlur = Math.max(settings.shadowBlur - memoryPressureLevel * 2, 1);
             }
+            
+            return settings;
         }
         
         const filterEffects = {
@@ -673,9 +882,16 @@
                 );
                 
                 document.getElementById('loading').style.display = 'none';
+                const optimizations = [
+                    'frame-skipping',
+                    'memory-mgmt',
+                    'animation-culling',
+                    'fast-math'
+                ].join(' + ');
+                
                 const statusMessage = isSafari ? 
-                    `Ready! Safari-optimized multi-face detection. Max faces: ${maxFaces}` :
-                    `Ready! Multi-face filters active - preview only. Performance: ${performanceLevel}`;
+                    `Ready! Safari-optimized multi-face detection. Max faces: ${maxFaces}. Optimizations: ${optimizations}` :
+                    `Ready! Multi-face filters active - preview only. Performance: ${performanceLevel}. Optimizations: ${optimizations}`;
                     
                 document.getElementById('statusText').textContent = statusMessage;
                 
@@ -728,7 +944,11 @@
         
         function drawBouncingBall(ctx, x, y, size, color, time) {
             const quality = getQualitySettings();
-            const bounce = Math.abs(Math.sin(time * 3 * quality.animationSpeed)) * 20;
+            const bounce = Math.abs(fastSin(time * 3 * quality.animationSpeed)) * 20;
+            
+            // Cull if outside viewport
+            if (!isInViewport(x, y - bounce, size, ctx.canvas.width, ctx.canvas.height)) return;
+            
             ctx.save();
             ctx.fillStyle = color;
             ctx.shadowColor = color;
@@ -741,10 +961,13 @@
         
         function drawTwinklingStar(ctx, x, y, size, color, time) {
             const quality = getQualitySettings();
-            const twinkle = 0.5 + 0.5 * Math.sin(time * 4 * quality.animationSpeed);
+            const twinkle = 0.5 + 0.5 * fastSin(time * 4 * quality.animationSpeed);
             const points = 5;
             const outerRadius = size * twinkle;
             const innerRadius = size * 0.5 * twinkle;
+            
+            // Cull if outside viewport
+            if (!isInViewport(x, y, outerRadius, ctx.canvas.width, ctx.canvas.height)) return;
             
             ctx.save();
             ctx.fillStyle = color;
@@ -752,13 +975,20 @@
             ctx.shadowBlur = quality.shadowBlur * twinkle;
             ctx.beginPath();
             ctx.translate(x, y);
-            ctx.rotate(time * 0.5 * quality.animationSpeed);
+            
+            const rotation = time * 0.5 * quality.animationSpeed;
+            const cosRot = fastCos(rotation);
+            const sinRot = fastSin(rotation);
             
             for (let i = 0; i < points * 2; i++) {
                 const radius = i % 2 === 0 ? outerRadius : innerRadius;
                 const angle = (i * Math.PI) / points;
-                const px = Math.cos(angle) * radius;
-                const py = Math.sin(angle) * radius;
+                const tempX = fastCos(angle) * radius;
+                const tempY = fastSin(angle) * radius;
+                
+                // Apply rotation manually for better performance
+                const px = tempX * cosRot - tempY * sinRot;
+                const py = tempX * sinRot + tempY * cosRot;
                 
                 if (i === 0) ctx.moveTo(px, py);
                 else ctx.lineTo(px, py);
@@ -769,15 +999,19 @@
         }
         
         function drawFloatingHeart(ctx, x, y, size, color, time, offset) {
-            const float = Math.sin(time * 2 + offset) * 15;
-            const scale = 0.8 + 0.2 * Math.sin(time * 3 + offset);
+            const float = fastSin(time * 2 + offset) * 15;
+            const scale = 0.8 + 0.2 * fastSin(time * 3 + offset);
             const heartSize = size * scale;
+            const finalY = y + float;
+            
+            // Cull if outside viewport
+            if (!isInViewport(x, finalY, heartSize * 30, ctx.canvas.width, ctx.canvas.height)) return;
             
             ctx.save();
             ctx.fillStyle = color;
             ctx.shadowColor = color;
             ctx.shadowBlur = 8;
-            ctx.translate(x, y + float);
+            ctx.translate(x, finalY);
             ctx.scale(heartSize, heartSize);
             
             ctx.beginPath();
@@ -793,8 +1027,11 @@
         function drawMovingDot(ctx, centerX, centerY, size, color, time, speed, faceWidth) {
             const radius = faceWidth * 0.6;
             const angle = time * speed;
-            const x = centerX + Math.cos(angle) * radius;
-            const y = centerY + Math.sin(angle) * radius * 0.7;
+            const x = centerX + fastCos(angle) * radius;
+            const y = centerY + fastSin(angle) * radius * 0.7;
+            
+            // Cull if outside viewport
+            if (!isInViewport(x, y, size, ctx.canvas.width, ctx.canvas.height)) return;
             
             ctx.save();
             ctx.fillStyle = color;
@@ -807,9 +1044,12 @@
         }
         
         function drawSwimmingFish(ctx, x, y, size, color, time, speed, faceWidth) {
-            const swimX = x + Math.sin(time * speed) * faceWidth * 0.8;
-            const swimY = y + Math.cos(time * speed * 0.7) * 20;
-            const fishSize = size * (0.8 + 0.2 * Math.sin(time * 2));
+            const swimX = x + fastSin(time * speed) * faceWidth * 0.8;
+            const swimY = y + fastCos(time * speed * 0.7) * 20;
+            const fishSize = size * (0.8 + 0.2 * fastSin(time * 2));
+            
+            // Cull if outside viewport (fish is larger, so use bigger radius)
+            if (!isInViewport(swimX, swimY, fishSize * 50, ctx.canvas.width, ctx.canvas.height)) return;
             
             ctx.save();
             ctx.fillStyle = color;
@@ -844,26 +1084,37 @@
             const quality = getQualitySettings();
             const actualCount = Math.min(count, quality.particleCount);
             
+            // Cull entire burst if center is far outside viewport
+            const maxDistance = 50; // Maximum particle distance from center
+            if (!isInViewport(x, y, maxDistance, ctx.canvas.width, ctx.canvas.height)) return;
+            
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = quality.shadowBlur;
+            
             for (let i = 0; i < actualCount; i++) {
                 const angle = (i / actualCount) * Math.PI * 2;
-                const distance = 30 + Math.sin(time * 3 * quality.animationSpeed) * 20;
-                const px = x + Math.cos(angle) * distance;
-                const py = y + Math.sin(angle) * distance;
-                const sparkleSize = 3 + Math.sin(time * 4 * quality.animationSpeed + i) * 2;
+                const distance = 30 + fastSin(time * 3 * quality.animationSpeed) * 20;
+                const px = x + fastCos(angle) * distance;
+                const py = y + fastSin(angle) * distance;
+                const sparkleSize = 3 + fastSin(time * 4 * quality.animationSpeed + i) * 2;
                 
-                ctx.save();
-                ctx.fillStyle = color;
-                ctx.shadowColor = color;
-                ctx.shadowBlur = quality.shadowBlur;
-                ctx.beginPath();
-                ctx.arc(px, py, sparkleSize, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.restore();
+                // Individual particle culling
+                if (isInViewport(px, py, sparkleSize, ctx.canvas.width, ctx.canvas.height)) {
+                    ctx.beginPath();
+                    ctx.arc(px, py, sparkleSize, 0, Math.PI * 2);
+                    ctx.fill();
+                }
             }
+            ctx.restore();
         }
         
         function drawFilter(ctx, face) {
             if (currentFilter === 'none' || !filterEffects[currentFilter]) return;
+            
+            // Cull entire face if outside viewport
+            if (shouldCullAnimation(face, ctx.canvas.width, ctx.canvas.height)) return;
             
             const filter = filterEffects[currentFilter];
             const points = getFacePoints(face);
@@ -959,65 +1210,100 @@
                 const deltaTime = currentTime - lastFrameTime;
                 lastFrameTime = currentTime;
                 
-                // Calculate FPS
+                // Calculate FPS and adjust performance
                 frameCount++;
                 if (frameCount % 30 === 0) {
                     fps = Math.round(1000 / deltaTime);
                     
-                    // Safari-specific performance monitoring
-                    if (isSafari && fps < 15) {
-                        console.warn(`Safari performance warning: FPS dropped to ${fps}`);
-                        // Temporarily reduce detection frequency
-                        quality.detectionInterval = Math.min(quality.detectionInterval + 1, 5);
+                    // Dynamic performance adjustment
+                    if (fps < 20) {
+                        dynamicSkipInterval = Math.min(dynamicSkipInterval + 1, 5);
+                        if (performanceLevel === 'high') performanceLevel = 'medium';
+                        else if (performanceLevel === 'medium') performanceLevel = 'low';
+                    } else if (fps > 28 && dynamicSkipInterval > 1) {
+                        dynamicSkipInterval = Math.max(dynamicSkipInterval - 1, 1);
                     }
                 }
                 
-                // Adaptive animation speed based on performance
-                const targetFPS = isSafari ? 24 : 30; // Lower target FPS for Safari
+                // Memory management
+                const quality = getQualitySettings();
+                if (frameCount % quality.memoryCleanupInterval === 0) {
+                    manageTensorMemory();
+                }
+                
+                // Adaptive animation speed
+                const targetFPS = isSafari ? 24 : 30;
                 const speedMultiplier = Math.min(1, targetFPS / Math.max(fps, 1));
                 animationTime += (isSafari ? 0.04 : 0.05) * speedMultiplier;
                 
-                // Skip detection on some frames for better performance
-                const quality = getQualitySettings();
-                const shouldDetect = frameCount % quality.detectionInterval === 0;
+                // Smart frame skipping strategy
+                skipFrameCounter++;
+                const effectiveSkipInterval = Math.max(quality.detectionInterval, dynamicSkipInterval);
+                const shouldDetect = skipFrameCounter >= effectiveSkipInterval;
+                
+                let currentFaces = cachedFaces || [];
                 
                 if (shouldDetect) {
-                    // Safari-specific detection optimizations
+                    skipFrameCounter = 0;
+                    
+                    // Optimized detection options
                     const detectionOptions = { 
                         input: video,
-                        returnTensors: false, // Don't return tensors to save memory on Safari
-                        flipHorizontal: false // Disable unnecessary processing
+                        returnTensors: false,
+                        flipHorizontal: false
                     };
                     
                     const predictions = await model.estimateFaces(detectionOptions);
                     
-                    ctx.clearRect(0, 0, overlay.width, overlay.height);
-                    
-                    if (predictions.length > 0 && !isCapturing) {
-                        // Safari: Process faces sequentially instead of in parallel for stability
-                        if (isSafari) {
-                            for (let i = 0; i < predictions.length; i++) {
-                                drawFilter(ctx, predictions[i]);
+                    if (predictions.length > 0) {
+                        // Calculate face movement for adaptive skipping
+                        const movement = calculateFaceMovement(predictions, lastFaces);
+                        
+                        if (movement < faceMovementThreshold) {
+                            consecutiveStableFrames++;
+                            // Increase skip interval for stable faces
+                            if (consecutiveStableFrames > 10) {
+                                dynamicSkipInterval = Math.min(dynamicSkipInterval + 1, quality.maxSkipFrames);
                             }
                         } else {
-                            predictions.forEach(face => {
-                                drawFilter(ctx, face);
-                            });
+                            consecutiveStableFrames = 0;
+                            dynamicSkipInterval = Math.max(dynamicSkipInterval - 1, 1);
                         }
                         
-                        // Debug logging for Safari
-                        if (isSafari && frameCount % 60 === 0) {
-                            console.log(`Safari: Detected ${predictions.length} faces at frame ${frameCount}`);
-                        }
+                        lastFaces = [...predictions];
+                        cachedFaces = predictions;
+                        currentFaces = predictions;
                     }
-                    
-                    // Safari memory management - clean up tensors periodically
-                    if (isSafari && frameCount % 120 === 0) {
-                        if (tf.memory().numTensors > 50) {
-                            console.log('Safari: Cleaning up tensors');
-                            tf.engine().startScope();
-                            tf.engine().endScope();
+                } else if (cachedFaces) {
+                    // Use interpolated faces for smooth animation
+                    const progress = skipFrameCounter / effectiveSkipInterval;
+                    currentFaces = interpolateFaces(cachedFaces, Math.min(progress, 1));
+                }
+                
+                // Optimized rendering with canvas management
+                if (overlay.width !== lastCanvasWidth || overlay.height !== lastCanvasHeight) {
+                    lastCanvasWidth = overlay.width;
+                    lastCanvasHeight = overlay.height;
+                    initOffscreenCanvas();
+                    if (offscreenCanvas) {
+                        offscreenCanvas.width = overlay.width;
+                        offscreenCanvas.height = overlay.height;
+                    }
+                }
+                
+                // Clear only when necessary
+                ctx.clearRect(0, 0, overlay.width, overlay.height);
+                
+                if (currentFaces.length > 0 && !isCapturing) {
+                    // Process faces with performance considerations
+                    if (isSafari) {
+                        for (let i = 0; i < currentFaces.length; i++) {
+                            drawFilter(ctx, currentFaces[i]);
                         }
+                    } else {
+                        currentFaces.forEach(face => {
+                            drawFilter(ctx, face);
+                        });
                     }
                 }
                 
@@ -1026,16 +1312,15 @@
             } catch (error) {
                 console.error('Detection error:', error);
                 
-                // Safari-specific error recovery
-                if (isSafari && error.message.includes('memory')) {
-                    console.warn('Safari memory issue detected, reducing quality');
+                // Error recovery with memory cleanup
+                if (error.message.includes('memory') || error.message.includes('tensor')) {
+                    console.warn('Memory error detected, performing cleanup');
+                    manageTensorMemory();
                     if (performanceLevel !== 'low') {
                         performanceLevel = 'low';
-                        quality.detectionInterval = 5;
                     }
                 }
                 
-                // Continue animation even if detection fails
                 requestAnimationFrame(detectAndDraw);
             }
         }
@@ -1111,6 +1396,9 @@
                 
                 // Detect device performance first
                 detectPerformance();
+                
+                // Initialize Web Worker if supported
+                useWebWorker = initWebWorker();
                 
                 await setupCamera();
                 
