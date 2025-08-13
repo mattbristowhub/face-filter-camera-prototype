@@ -347,8 +347,8 @@
         </div>
         
         <div class="info">
-            💡 <strong>Animated Attention Filters!</strong><br>
-            Interactive filters designed for children & pets. Work on multiple faces in preview only. Photos save unfiltered.
+            💡 <strong>Animated Filters + Extreme Morph!</strong><br>
+            Interactive filters for children & pets + cartoon morph with massive eyes & huge mouth. Multi-face preview only. Photos save unfiltered.
         </div>
         
         <div class="controls">
@@ -360,6 +360,7 @@
                 <button class="filter-btn" data-filter="pet_dots">🔴</button>
                 <button class="filter-btn" data-filter="prey_fish">🐟</button>
                 <button class="filter-btn" data-filter="sparkle_burst">✨</button>
+                <button class="filter-btn" data-filter="face_morph">🎭</button>
             </div>
             <button class="capture-btn" id="captureBtn"></button>
         </div>
@@ -419,6 +420,12 @@
         let detectionWorker = null;
         let workerBusy = false;
         let pendingDetection = false;
+        
+        // Face morph variables
+        let morphCanvas = null;
+        let morphCtx = null;
+        let morphImageData = null;
+        let faceMorph = null;
         
         // Browser compatibility polyfills
         if (!window.requestAnimationFrame) {
@@ -585,6 +592,417 @@
             // In a full implementation, this would send video data to worker
             // and receive face detection results asynchronously
             return null;
+        }
+        
+        // Face Morphing System
+        class FaceMorph {
+            constructor() {
+                this.intensity = 1.0;
+                this.eyeScaleFactor = 2.5;    // 150% larger eyes (extreme)
+                this.faceSlimFactor = 0.85;   // 15% slimmer face
+                this.jawReductionFactor = 0.9; // 10% smaller jaw
+                this.mouthScaleFactor = 2.2;  // 120% larger mouth (extreme)
+            }
+            
+            // Get key morphing landmarks from MediaPipe face mesh
+            getMorphingLandmarks(face) {
+                const mesh = face.scaledMesh;
+                return {
+                    // Eye regions
+                    leftEyeCenter: mesh[468] || mesh[33],  // Fallback to outline point
+                    rightEyeCenter: mesh[473] || mesh[263],
+                    leftEyeTop: mesh[159],
+                    leftEyeBottom: mesh[145],
+                    leftEyeInner: mesh[133],
+                    leftEyeOuter: mesh[33],
+                    rightEyeTop: mesh[386],
+                    rightEyeBottom: mesh[374],
+                    rightEyeInner: mesh[362],
+                    rightEyeOuter: mesh[263],
+                    
+                    // Face outline for slimming
+                    faceLeft: mesh[172],
+                    faceRight: mesh[397],
+                    chinTip: mesh[175],
+                    foreheadCenter: mesh[9],
+                    
+                    // Nose for reference
+                    noseTip: mesh[1],
+                    
+                    // Jaw line for reduction
+                    leftJaw: mesh[172],
+                    rightJaw: mesh[397],
+                    jawCenter: mesh[175],
+                    
+                    // Mouth landmarks for enlargement
+                    mouthLeftCorner: mesh[61],
+                    mouthRightCorner: mesh[291],
+                    mouthTopCenter: mesh[13],
+                    mouthBottomCenter: mesh[17],
+                    upperLipTop: mesh[12],
+                    lowerLipBottom: mesh[15],
+                    mouthCenter: null // Will be calculated
+                };
+                
+                // Calculate mouth center from corners
+                if (landmarks.mouthLeftCorner && landmarks.mouthRightCorner) {
+                    landmarks.mouthCenter = [
+                        (landmarks.mouthLeftCorner[0] + landmarks.mouthRightCorner[0]) / 2,
+                        (landmarks.mouthLeftCorner[1] + landmarks.mouthRightCorner[1]) / 2
+                    ];
+                }
+                
+                return landmarks;
+            }
+            
+            // Calculate inverse transformation for proper warping (reverse mapping)
+            inverseTransformPoint(x, y, landmarks, canvasWidth, canvasHeight) {
+                let newX = x;
+                let newY = y;
+                
+                // Reverse face slimming (horizontal expansion from center)
+                const faceCenter = (landmarks.faceLeft[0] + landmarks.faceRight[0]) / 2;
+                const faceInfluence = this.calculateFaceSlimInfluence(x, y, landmarks);
+                
+                if (faceInfluence > 0) {
+                    const compressionFactor = 1 - (1 - this.faceSlimFactor) * faceInfluence * this.intensity;
+                    const expansionFactor = 1 / compressionFactor;
+                    newX = faceCenter + (newX - faceCenter) * expansionFactor;
+                }
+                
+                // Reverse eye enlargement (shrink from eye centers)
+                const leftEyeInfluence = this.calculateEyeInfluence(x, y, landmarks.leftEyeCenter, landmarks);
+                const rightEyeInfluence = this.calculateEyeInfluence(x, y, landmarks.rightEyeCenter, landmarks);
+                
+                if (leftEyeInfluence > 0) {
+                    const scale = 1 + (this.eyeScaleFactor - 1) * leftEyeInfluence * this.intensity;
+                    const shrinkFactor = 1 / scale;
+                    const centerX = landmarks.leftEyeCenter[0];
+                    const centerY = landmarks.leftEyeCenter[1];
+                    newX = centerX + (newX - centerX) * shrinkFactor;
+                    newY = centerY + (newY - centerY) * shrinkFactor;
+                }
+                
+                if (rightEyeInfluence > 0) {
+                    const scale = 1 + (this.eyeScaleFactor - 1) * rightEyeInfluence * this.intensity;
+                    const shrinkFactor = 1 / scale;
+                    const centerX = landmarks.rightEyeCenter[0];
+                    const centerY = landmarks.rightEyeCenter[1];
+                    newX = centerX + (newX - centerX) * shrinkFactor;
+                    newY = centerY + (newY - centerY) * shrinkFactor;
+                }
+                
+                // Reverse mouth enlargement (shrink from mouth center)
+                const mouthInfluence = this.calculateMouthInfluence(x, y, landmarks.mouthCenter, landmarks);
+                
+                if (mouthInfluence > 0) {
+                    const scale = 1 + (this.mouthScaleFactor - 1) * mouthInfluence * this.intensity;
+                    const shrinkFactor = 1 / scale;
+                    const centerX = landmarks.mouthCenter[0];
+                    const centerY = landmarks.mouthCenter[1];
+                    newX = centerX + (newX - centerX) * shrinkFactor;
+                    newY = centerY + (newY - centerY) * shrinkFactor;
+                }
+                
+                return [newX, newY];
+            }
+            
+            // Calculate transformation for a single point
+            transformPoint(x, y, landmarks, canvasWidth, canvasHeight) {
+                let newX = x;
+                let newY = y;
+                
+                // Eye enlargement
+                const leftEyeInfluence = this.calculateEyeInfluence(x, y, landmarks.leftEyeCenter, landmarks);
+                const rightEyeInfluence = this.calculateEyeInfluence(x, y, landmarks.rightEyeCenter, landmarks);
+                
+                if (leftEyeInfluence > 0) {
+                    const scale = 1 + (this.eyeScaleFactor - 1) * leftEyeInfluence * this.intensity;
+                    const centerX = landmarks.leftEyeCenter[0];
+                    const centerY = landmarks.leftEyeCenter[1];
+                    newX = centerX + (x - centerX) * scale;
+                    newY = centerY + (y - centerY) * scale;
+                }
+                
+                if (rightEyeInfluence > 0) {
+                    const scale = 1 + (this.eyeScaleFactor - 1) * rightEyeInfluence * this.intensity;
+                    const centerX = landmarks.rightEyeCenter[0];
+                    const centerY = landmarks.rightEyeCenter[1];
+                    newX = centerX + (x - centerX) * scale;
+                    newY = centerY + (y - centerY) * scale;
+                }
+                
+                // Mouth enlargement
+                const mouthInfluence = this.calculateMouthInfluence(x, y, landmarks.mouthCenter, landmarks);
+                
+                if (mouthInfluence > 0) {
+                    const scale = 1 + (this.mouthScaleFactor - 1) * mouthInfluence * this.intensity;
+                    const centerX = landmarks.mouthCenter[0];
+                    const centerY = landmarks.mouthCenter[1];
+                    newX = centerX + (newX - centerX) * scale;
+                    newY = centerY + (newY - centerY) * scale;
+                }
+                
+                // Face slimming (horizontal compression toward center)
+                const faceCenter = (landmarks.faceLeft[0] + landmarks.faceRight[0]) / 2;
+                const faceInfluence = this.calculateFaceSlimInfluence(x, y, landmarks);
+                
+                if (faceInfluence > 0) {
+                    const compressionFactor = 1 - (1 - this.faceSlimFactor) * faceInfluence * this.intensity;
+                    newX = faceCenter + (newX - faceCenter) * compressionFactor;
+                }
+                
+                return [newX, newY];
+            }
+            
+            // Calculate influence of eye enlargement at a point (enhanced for extreme scaling)
+            calculateEyeInfluence(x, y, eyeCenter, landmarks) {
+                if (!eyeCenter) return 0;
+                
+                const distance = Math.sqrt(
+                    Math.pow(x - eyeCenter[0], 2) + Math.pow(y - eyeCenter[1], 2)
+                );
+                
+                // Larger eye region radius for extreme scaling - extended influence zone
+                const baseEyeRadius = Math.abs(landmarks.leftEyeOuter[0] - landmarks.leftEyeInner[0]) * 1.2;
+                const eyeRadius = baseEyeRadius * (this.eyeScaleFactor > 2.0 ? 1.3 : 1.0);
+                
+                if (distance > eyeRadius) return 0;
+                
+                // Enhanced smooth falloff for extreme transformations
+                const normalizedDistance = distance / eyeRadius;
+                // Use a gentler falloff for larger transformations to avoid harsh edges
+                const falloff = this.eyeScaleFactor > 2.0 ? 
+                    Math.pow(Math.cos(normalizedDistance * Math.PI / 2), 0.7) :
+                    Math.cos(normalizedDistance * Math.PI / 2);
+                
+                return falloff;
+            }
+            
+            // Calculate influence of face slimming at a point
+            calculateFaceSlimInfluence(x, y, landmarks) {
+                const faceWidth = Math.abs(landmarks.faceRight[0] - landmarks.faceLeft[0]);
+                const faceHeight = Math.abs(landmarks.foreheadCenter[1] - landmarks.chinTip[1]);
+                const faceCenter = (landmarks.faceLeft[0] + landmarks.faceRight[0]) / 2;
+                const faceCenterY = (landmarks.foreheadCenter[1] + landmarks.chinTip[1]) / 2;
+                
+                // Check if point is within face region
+                const distanceFromCenterX = Math.abs(x - faceCenter);
+                const distanceFromCenterY = Math.abs(y - faceCenterY);
+                
+                if (distanceFromCenterX > faceWidth * 0.6 || distanceFromCenterY > faceHeight * 0.6) {
+                    return 0;
+                }
+                
+                // Stronger influence on the sides of the face
+                const horizontalInfluence = Math.max(0, 1 - (distanceFromCenterX / (faceWidth * 0.3)));
+                const verticalInfluence = Math.max(0, 1 - (distanceFromCenterY / (faceHeight * 0.6)));
+                
+                return horizontalInfluence * verticalInfluence * 0.8; // Reduce overall intensity
+            }
+            
+            // Calculate influence of mouth enlargement at a point (enhanced for extreme scaling)
+            calculateMouthInfluence(x, y, mouthCenter, landmarks) {
+                if (!mouthCenter || !landmarks.mouthLeftCorner || !landmarks.mouthRightCorner) return 0;
+                
+                const distance = Math.sqrt(
+                    Math.pow(x - mouthCenter[0], 2) + Math.pow(y - mouthCenter[1], 2)
+                );
+                
+                // Estimate mouth region radius from corners and vertical extent
+                const mouthWidth = Math.abs(landmarks.mouthRightCorner[0] - landmarks.mouthLeftCorner[0]);
+                const mouthHeight = landmarks.mouthBottomCenter && landmarks.mouthTopCenter ? 
+                    Math.abs(landmarks.mouthBottomCenter[1] - landmarks.mouthTopCenter[1]) : mouthWidth * 0.3;
+                
+                // Expanded elliptical influence region for extreme scaling
+                const scaleMultiplier = this.mouthScaleFactor > 1.8 ? 1.4 : 1.0;
+                const mouthRadiusX = mouthWidth * 0.9 * scaleMultiplier;
+                const mouthRadiusY = Math.max(mouthHeight * 1.5, mouthWidth * 0.5) * scaleMultiplier;
+                
+                // Calculate elliptical distance
+                const normalizedX = (x - mouthCenter[0]) / mouthRadiusX;
+                const normalizedY = (y - mouthCenter[1]) / mouthRadiusY;
+                const ellipticalDistance = Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
+                
+                if (ellipticalDistance > 1.0) return 0;
+                
+                // Enhanced smooth falloff for extreme transformations
+                const falloff = this.mouthScaleFactor > 1.8 ? 
+                    Math.pow(Math.cos(ellipticalDistance * Math.PI / 2), 0.6) :
+                    Math.cos(ellipticalDistance * Math.PI / 2);
+                
+                return falloff;
+            }
+        }
+        
+        // Initialize morphing canvas
+        function initMorphCanvas() {
+            if (!morphCanvas) {
+                morphCanvas = document.createElement('canvas');
+                morphCtx = morphCanvas.getContext('2d', { willReadFrequently: true });
+            }
+        }
+        
+        // Apply face morphing to video frame
+        function applyFaceMorph(ctx, face) {
+            if (!faceMorph) return;
+            
+            // Adjust morphing intensity based on performance
+            const quality = getQualitySettings();
+            switch (performanceLevel) {
+                case 'low':
+                    faceMorph.intensity = 0.8;
+                    faceMorph.eyeScaleFactor = 1.6;    // 60% larger eyes (moderate extreme)
+                    faceMorph.mouthScaleFactor = 1.4;  // 40% larger mouth
+                    faceMorph.faceSlimFactor = 0.9;
+                    break;
+                case 'medium':
+                    faceMorph.intensity = 0.9;
+                    faceMorph.eyeScaleFactor = 2.0;    // 100% larger eyes (high extreme)
+                    faceMorph.mouthScaleFactor = 1.8;  // 80% larger mouth
+                    faceMorph.faceSlimFactor = 0.88;
+                    break;
+                case 'high':
+                default:
+                    faceMorph.intensity = 1.0;
+                    faceMorph.eyeScaleFactor = 2.5;    // 150% larger eyes (maximum extreme)
+                    faceMorph.mouthScaleFactor = 2.2;  // 120% larger mouth
+                    faceMorph.faceSlimFactor = 0.85;
+                    break;
+            }
+            
+            // Initialize morph canvas if needed
+            initMorphCanvas();
+            
+            const canvasWidth = ctx.canvas.width;
+            const canvasHeight = ctx.canvas.height;
+            
+            // Set morph canvas size to match main canvas
+            if (morphCanvas.width !== canvasWidth || morphCanvas.height !== canvasHeight) {
+                morphCanvas.width = canvasWidth;
+                morphCanvas.height = canvasHeight;
+            }
+            
+            // Get morphing landmarks
+            const landmarks = faceMorph.getMorphingLandmarks(face);
+            
+            // Calculate face bounding box for optimization
+            const points = getFacePoints(face);
+            const { faceWidth, faceHeight, eyeCenter } = getFaceDimensions(points);
+            
+            // Create expanded bounding box for extreme transformations
+            // Much larger padding needed for massive eye/mouth scaling
+            const paddingMultiplier = performanceLevel === 'low' ? 0.4 : (performanceLevel === 'medium' ? 0.6 : 0.8);
+            const faceMultiplier = performanceLevel === 'low' ? 0.8 : (performanceLevel === 'medium' ? 1.0 : 1.2);
+            const heightMultiplier = performanceLevel === 'low' ? 0.9 : (performanceLevel === 'medium' ? 1.1 : 1.3);
+            
+            const padding = Math.max(faceWidth, faceHeight) * paddingMultiplier;
+            const minX = Math.max(0, Math.floor(eyeCenter[0] - faceWidth * faceMultiplier - padding));
+            const maxX = Math.min(canvasWidth, Math.ceil(eyeCenter[0] + faceWidth * faceMultiplier + padding));
+            const minY = Math.max(0, Math.floor(eyeCenter[1] - faceHeight * heightMultiplier - padding));
+            const maxY = Math.min(canvasHeight, Math.ceil(eyeCenter[1] + faceHeight * heightMultiplier + padding));
+            
+            const regionWidth = maxX - minX;
+            const regionHeight = maxY - minY;
+            
+            if (regionWidth <= 0 || regionHeight <= 0) return;
+            
+            try {
+                // Performance monitoring for morphing
+                const morphStartTime = performance.now();
+                
+                // Get image data from video region
+                const videoImageData = ctx.getImageData(minX, minY, regionWidth, regionHeight);
+                const sourceData = videoImageData.data;
+                
+                // Create output image data
+                const outputImageData = morphCtx.createImageData(regionWidth, regionHeight);
+                const outputData = outputImageData.data;
+                
+                // Process pixels with morphing transformation
+                for (let y = 0; y < regionHeight; y++) {
+                    for (let x = 0; x < regionWidth; x++) {
+                        const outputIndex = (y * regionWidth + x) * 4;
+                        
+                        // Calculate world coordinates
+                        const worldX = minX + x;
+                        const worldY = minY + y;
+                        
+                        // Apply inverse morphing transformation for proper warping
+                        const [sourceX, sourceY] = faceMorph.inverseTransformPoint(worldX, worldY, landmarks, canvasWidth, canvasHeight);
+                        
+                        // Convert back to relative coordinates
+                        const relativeSourceX = sourceX - minX;
+                        const relativeSourceY = sourceY - minY;
+                        
+                        // Bilinear interpolation for smooth results
+                        const sample = bilinearSample(sourceData, relativeSourceX, relativeSourceY, regionWidth, regionHeight);
+                        
+                        outputData[outputIndex] = sample[0];     // R
+                        outputData[outputIndex + 1] = sample[1]; // G
+                        outputData[outputIndex + 2] = sample[2]; // B
+                        outputData[outputIndex + 3] = sample[3]; // A
+                    }
+                }
+                
+                // Put the morphed region back to canvas
+                ctx.putImageData(outputImageData, minX, minY);
+                
+                // Enhanced performance monitoring for extreme mode
+                const morphTime = performance.now() - morphStartTime;
+                if (frameCount % 60 === 0) {
+                    const extremeMode = faceMorph.eyeScaleFactor > 2.0 || faceMorph.mouthScaleFactor > 1.8;
+                    console.log(`${extremeMode ? 'EXTREME' : 'Standard'} Morph: ${morphTime.toFixed(1)}ms, Region: ${regionWidth}x${regionHeight}, Eyes: ${faceMorph.eyeScaleFactor.toFixed(1)}x, Mouth: ${faceMorph.mouthScaleFactor.toFixed(1)}x`);
+                    
+                    // Auto-adjust if extreme mode is too slow
+                    if (extremeMode && morphTime > 50 && performanceLevel !== 'low') {
+                        console.warn('Extreme morph performance warning - consider reducing quality');
+                    }
+                }
+                
+            } catch (error) {
+                console.warn('Morphing error:', error);
+                // Continue without morphing if there's an error
+            }
+        }
+        
+        // Bilinear interpolation for smooth pixel sampling
+        function bilinearSample(imageData, x, y, width, height) {
+            // Clamp coordinates
+            x = Math.max(0, Math.min(width - 1, x));
+            y = Math.max(0, Math.min(height - 1, y));
+            
+            const x1 = Math.floor(x);
+            const y1 = Math.floor(y);
+            const x2 = Math.min(x1 + 1, width - 1);
+            const y2 = Math.min(y1 + 1, height - 1);
+            
+            const fx = x - x1;
+            const fy = y - y1;
+            
+            const getPixel = (px, py) => {
+                const index = (py * width + px) * 4;
+                return [
+                    imageData[index] || 0,     // R
+                    imageData[index + 1] || 0, // G
+                    imageData[index + 2] || 0, // B
+                    imageData[index + 3] || 255 // A
+                ];
+            };
+            
+            const p1 = getPixel(x1, y1);
+            const p2 = getPixel(x2, y1);
+            const p3 = getPixel(x1, y2);
+            const p4 = getPixel(x2, y2);
+            
+            const result = [];
+            for (let i = 0; i < 4; i++) {
+                const top = p1[i] * (1 - fx) + p2[i] * fx;
+                const bottom = p3[i] * (1 - fx) + p4[i] * fx;
+                result[i] = Math.round(top * (1 - fy) + bottom * fy);
+            }
+            
+            return result;
         }
         
         // Performance detection function with caching
@@ -765,6 +1183,11 @@
                 parts: [
                     { type: 'particle_burst', position: 'nose', particleType: 'sparkle', color: '#FFD700', count: 8 }
                 ]
+            },
+            face_morph: {
+                type: 'morph',
+                name: 'Extreme Morph',
+                description: 'Massive eyes + huge mouth + slim face cartoon filter'
             }
         };
         
@@ -1117,6 +1540,14 @@
             if (shouldCullAnimation(face, ctx.canvas.width, ctx.canvas.height)) return;
             
             const filter = filterEffects[currentFilter];
+            
+            // Handle morphing filter
+            if (filter.type === 'morph') {
+                applyFaceMorph(ctx, face);
+                return;
+            }
+            
+            // Handle other filter types
             const points = getFacePoints(face);
             const { faceWidth, faceHeight, eyeCenter } = getFaceDimensions(points);
             
@@ -1291,10 +1722,15 @@
                     }
                 }
                 
-                // Clear only when necessary
+                // Clear canvas
                 ctx.clearRect(0, 0, overlay.width, overlay.height);
                 
                 if (currentFaces.length > 0 && !isCapturing) {
+                    // For morphing filter, draw video frame first
+                    if (currentFilter === 'face_morph') {
+                        ctx.drawImage(video, 0, 0, overlay.width, overlay.height);
+                    }
+                    
                     // Process faces with performance considerations
                     if (isSafari) {
                         for (let i = 0; i < currentFaces.length; i++) {
@@ -1399,6 +1835,9 @@
                 
                 // Initialize Web Worker if supported
                 useWebWorker = initWebWorker();
+                
+                // Initialize Face Morph system
+                faceMorph = new FaceMorph();
                 
                 await setupCamera();
                 
