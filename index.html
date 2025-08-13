@@ -12,6 +12,59 @@
             color: #fff;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             overflow: hidden;
+            /* Safari dynamic viewport support */
+            height: 100vh;
+            height: calc(var(--vh, 1vh) * 100);
+        }
+        
+        /* Safari interface visibility states */
+        body.safari-interface-visible .controls {
+            bottom: 45px !important;
+            padding-bottom: calc(45px + env(safe-area-inset-bottom, 35px)) !important;
+        }
+        
+        /* Safari tab bar specific adjustments */
+        body.safari-tab-bar-visible .controls {
+            bottom: 55px !important;
+            padding-bottom: calc(55px + env(safe-area-inset-bottom, 40px)) !important;
+            margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px) !important;
+        }
+        
+        /* Fallback positioning for unsupported browsers */
+        @supports not (padding: env(safe-area-inset-bottom)) {
+            .controls {
+                bottom: 40px !important;
+                padding-bottom: 40px !important;
+            }
+            
+            @media (max-width: 768px) {
+                .controls {
+                    bottom: 50px !important;
+                    padding-bottom: 50px !important;
+                }
+            }
+        }
+        
+        /* Additional Safari-specific enhancements */
+        @supports (-webkit-touch-callout: none) {
+            /* Prevent Safari from interfering with controls */
+            .controls {
+                -webkit-transform: translateX(-50%);
+                -webkit-backface-visibility: hidden;
+                backface-visibility: hidden;
+                will-change: transform;
+            }
+            
+            /* Enhanced scrolling for filter selector */
+            .filter-selector {
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+            }
+            
+            .filter-selector::-webkit-scrollbar {
+                display: none;
+            }
         }
         
         .container {
@@ -49,7 +102,7 @@
         
         .controls {
             position: absolute;
-            bottom: 20px;
+            bottom: 25px;
             left: 50%;
             transform: translateX(-50%);
             display: flex;
@@ -57,12 +110,24 @@
             align-items: center;
             background: rgba(0,0,0,0.5);
             padding: 15px 25px;
-            padding-bottom: calc(15px + env(safe-area-inset-bottom));
+            padding-bottom: calc(25px + env(safe-area-inset-bottom, 20px));
             border-radius: 50px;
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
             max-width: 90vw;
             overflow-x: auto;
+            /* Safari-specific bottom spacing for tab bar */
+            margin-bottom: env(safe-area-inset-bottom, 0px);
+        }
+        
+        /* Safari mobile specific adjustments */
+        @supports (-webkit-touch-callout: none) {
+            .controls {
+                bottom: 35px;
+                padding-bottom: calc(35px + env(safe-area-inset-bottom, 25px));
+                /* Additional Safari tab bar clearance */
+                margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+            }
         }
         
         .capture-btn {
@@ -77,6 +142,23 @@
             transition: all 0.3s ease;
             position: relative;
             touch-action: manipulation;
+            /* Enhanced iOS Safari touch support */
+            -webkit-tap-highlight-color: rgba(0,0,0,0.1);
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        
+        /* Ensure capture button meets 44px minimum touch target */
+        .capture-btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 74px; /* Slightly larger than button for easier touch */
+            height: 74px;
+            transform: translate(-50%, -50%);
+            z-index: -1;
         }
         
         .capture-btn:hover {
@@ -110,6 +192,27 @@
             justify-content: center;
             touch-action: manipulation;
             flex-shrink: 0;
+            /* Enhanced iOS Safari touch support */
+            -webkit-tap-highlight-color: rgba(255,255,255,0.3);
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            /* Minimum 44px touch target compliance */
+            position: relative;
+        }
+        
+        /* Ensure minimum touch target size on all devices */
+        .filter-btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 44px;
+            height: 44px;
+            min-width: 44px;
+            min-height: 44px;
+            transform: translate(-50%, -50%);
+            z-index: -1;
         }
         
         .filter-btn:hover {
@@ -121,12 +224,13 @@
             border-color: #4CAF50;
         }
         
-        /* Mobile-specific improvements */
+        /* Mobile-specific improvements with enhanced Safari support */
         @media (max-width: 768px) {
             .controls {
                 gap: 12px;
                 padding: 12px 20px;
-                bottom: 15px;
+                bottom: 30px; /* Increased from 15px for Safari tab bar */
+                padding-bottom: calc(30px + env(safe-area-inset-bottom, 25px));
             }
             
             .filter-btn {
@@ -135,6 +239,9 @@
                 min-width: 48px;
                 min-height: 48px;
                 font-size: 18px;
+                /* Enhanced touch targets for Safari */
+                touch-action: manipulation;
+                -webkit-tap-highlight-color: rgba(255,255,255,0.2);
             }
             
             .capture-btn {
@@ -142,6 +249,20 @@
                 height: 64px;
                 min-width: 64px;
                 min-height: 64px;
+                /* Enhanced touch targets for Safari */
+                touch-action: manipulation;
+                -webkit-tap-highlight-color: rgba(255,255,255,0.1);
+            }
+        }
+        
+        /* iOS Safari specific mobile adjustments */
+        @supports (-webkit-touch-callout: none) {
+            @media (max-width: 768px) {
+                .controls {
+                    bottom: 40px; /* Extra clearance for Safari tab bar */
+                    padding-bottom: calc(40px + env(safe-area-inset-bottom, 30px));
+                    margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 15px);
+                }
             }
         }
         
@@ -275,7 +396,7 @@
             }
         }
         
-        /* Landscape mode optimizations */
+        /* Enhanced landscape mode optimizations for Safari */
         @media (orientation: landscape) and (max-height: 500px) {
             .info {
                 top: 5px;
@@ -293,9 +414,11 @@
             }
             
             .controls {
-                bottom: 10px;
+                bottom: 15px; /* Increased for Safari landscape tab bar */
                 padding: 8px 16px;
+                padding-bottom: calc(15px + env(safe-area-inset-bottom, 10px));
                 gap: 8px;
+                margin-bottom: env(safe-area-inset-bottom, 0px);
             }
             
             .filter-btn {
@@ -304,6 +427,8 @@
                 min-width: 40px;
                 min-height: 40px;
                 font-size: 16px;
+                /* Ensure minimum 44px touch target even in landscape */
+                padding: 2px;
             }
             
             .capture-btn {
@@ -315,12 +440,27 @@
             
             #capturedImage {
                 width: 80px;
-                bottom: 70px;
+                bottom: 80px; /* Increased to clear controls */
                 right: 5px;
             }
             
             .camera-container {
                 margin: 5px;
+            }
+        }
+        
+        /* Safari landscape specific adjustments */
+        @supports (-webkit-touch-callout: none) {
+            @media (orientation: landscape) and (max-height: 500px) {
+                .controls {
+                    bottom: 25px; /* Extra clearance for Safari landscape */
+                    padding-bottom: calc(25px + env(safe-area-inset-bottom, 15px));
+                    margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 5px);
+                }
+                
+                #capturedImage {
+                    bottom: 90px; /* Adjust for higher controls */
+                }
             }
         }
         
@@ -1815,9 +1955,75 @@
             }, 500);
         }
         
-        // Add orientation change listeners
+        // Safari viewport height management
+        function handleSafariViewport() {
+            if (isSafari || isIOS) {
+                // Handle Safari's dynamic viewport
+                const vh = window.innerHeight * 0.01;
+                document.documentElement.style.setProperty('--vh', `${vh}px`);
+                
+                // Detect if Safari interface is visible (more robust detection)
+                const screenHeight = window.screen.height;
+                const windowHeight = window.innerHeight;
+                const heightRatio = windowHeight / screenHeight;
+                const isInterfaceVisible = heightRatio < 0.85; // More conservative threshold
+                
+                document.body.classList.toggle('safari-interface-visible', isInterfaceVisible);
+                
+                // Additional check for Safari tab bar specifically
+                const hasTabBar = windowHeight < screenHeight - 100; // Tab bar typically ~49px + margins
+                document.body.classList.toggle('safari-tab-bar-visible', hasTabBar);
+                
+                // Force controls repositioning after viewport change
+                setTimeout(() => {
+                    const controls = document.querySelector('.controls');
+                    if (controls) {
+                        controls.style.transform = 'translateX(-50%) translateZ(0)'; // Force repaint
+                        
+                        // Ensure controls are always visible
+                        const controlsRect = controls.getBoundingClientRect();
+                        const viewportBottom = window.innerHeight;
+                        
+                        if (controlsRect.bottom > viewportBottom - 10) {
+                            // Controls are too close to bottom, add emergency spacing
+                            controls.style.bottom = '60px';
+                            console.warn('Safari: Emergency control repositioning applied');
+                        }
+                    }
+                }, 100);
+            }
+        }
+        
+        // Enhanced orientation change handler
+        function handleOrientationChange() {
+            setTimeout(() => {
+                if (video && overlay) {
+                    overlay.width = video.videoWidth;
+                    overlay.height = video.videoHeight;
+                    
+                    // Safari viewport handling
+                    handleSafariViewport();
+                    
+                    // Restart detection after orientation change
+                    detectAndDraw();
+                }
+            }, 500);
+        }
+        
+        // Add comprehensive event listeners for Safari
         window.addEventListener('orientationchange', handleOrientationChange);
-        window.addEventListener('resize', handleOrientationChange);
+        window.addEventListener('resize', handleSafariViewport);
+        window.addEventListener('scroll', handleSafariViewport);
+        
+        // Initial Safari viewport setup
+        if (isSafari || isIOS) {
+            handleSafariViewport();
+            
+            // Handle Safari's initial load viewport issues
+            window.addEventListener('load', () => {
+                setTimeout(handleSafariViewport, 300);
+            });
+        }
         
         async function init() {
             try {
