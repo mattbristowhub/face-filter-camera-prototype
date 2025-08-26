@@ -1344,25 +1344,81 @@
                 }
             };
             
-            // iOS Safari specific constraints
+            // Enhanced iOS Safari specific constraints
             if (isIOS) {
-                constraints.video.width = { ideal: 320, max: 480 };
-                constraints.video.height = { ideal: 240, max: 360 };
-                constraints.video.frameRate = { ideal: 15, max: 24 };
+                constraints.video = {
+                    facingMode: 'user',
+                    width: { ideal: 320, max: 480 },
+                    height: { ideal: 240, max: 360 },
+                    frameRate: { ideal: 15, max: 20 }, // Lower max for stability
+                    // Critical iOS Safari constraints
+                    aspectRatio: { ideal: 4/3 },
+                    resizeMode: 'crop-and-scale'
+                };
+                console.log('iOS Safari: Using conservative camera constraints');
+            } else if (isSafari) {
+                // Non-iOS Safari (desktop)
+                constraints.video.frameRate = { ideal: 20, max: 24 };
+                constraints.video.width = { ideal: 480, max: 640 };
+                constraints.video.height = { ideal: 360, max: 480 };
+                console.log('Safari Desktop: Using optimized camera constraints');
             }
             
             try {
-                // Try getUserMedia with polyfill for older browsers
-                const getUserMedia = navigator.mediaDevices?.getUserMedia || 
-                                   navigator.webkitGetUserMedia || 
-                                   navigator.mozGetUserMedia || 
-                                   navigator.msGetUserMedia;
+                // Enhanced Safari camera access with multiple attempts
+                let stream = null;
+                let cameraAttempts = 0;
+                const maxCameraAttempts = isSafari ? 3 : 1;
                 
-                if (!getUserMedia) {
-                    throw new Error('Camera access is not supported in this browser');
+                while (cameraAttempts < maxCameraAttempts && !stream) {
+                    cameraAttempts++;
+                    console.log(`Camera access attempt ${cameraAttempts}/${maxCameraAttempts}`);
+                    
+                    try {
+                        // Check for getUserMedia support with Safari fallbacks
+                        if (!navigator.mediaDevices?.getUserMedia) {
+                            if (navigator.webkitGetUserMedia) {
+                                // Safari fallback
+                                stream = await new Promise((resolve, reject) => {
+                                    navigator.webkitGetUserMedia(constraints, resolve, reject);
+                                });
+                            } else {
+                                throw new Error('Camera access is not supported in this browser');
+                            }
+                        } else {
+                            stream = await navigator.mediaDevices.getUserMedia(constraints);
+                        }
+                        
+                        if (stream) {
+                            console.log('Camera stream obtained successfully');
+                            break;
+                        }
+                        
+                    } catch (cameraError) {
+                        console.warn(`Camera attempt ${cameraAttempts} failed:`, cameraError);
+                        
+                        if (isSafari && cameraAttempts < maxCameraAttempts) {
+                            // Progressive degradation for Safari
+                            if (constraints.video.width) {
+                                constraints.video.width.ideal = Math.max(240, constraints.video.width.ideal - 80);
+                                constraints.video.height.ideal = Math.max(180, constraints.video.height.ideal - 60);
+                            }
+                            if (constraints.video.frameRate) {
+                                constraints.video.frameRate.ideal = Math.max(10, constraints.video.frameRate.ideal - 5);
+                            }
+                            console.log('Safari: Reducing camera quality for retry');
+                            
+                            // Wait before retry
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        } else {
+                            throw cameraError;
+                        }
+                    }
                 }
                 
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                if (!stream) {
+                    throw new Error('Failed to obtain camera stream after multiple attempts');
+                }
                 
                 video.srcObject = stream;
                 
@@ -1375,22 +1431,74 @@
                 }
                 
                 return new Promise((resolve, reject) => {
-                    video.onloadedmetadata = () => {
-                        // Ensure video is playing on iOS
-                        if (isIOS && video.paused) {
-                            video.play().catch(reject);
+                    let resolved = false;
+                    
+                    const handleVideoReady = async () => {
+                        if (resolved) return;
+                        
+                        try {
+                            console.log('Video metadata loaded, readyState:', video.readyState);
+                            
+                            // Enhanced iOS Safari video initialization
+                            if (isIOS && video.paused) {
+                                // Multiple play attempts for iOS Safari
+                                let playAttempts = 0;
+                                const maxPlayAttempts = 3;
+                                
+                                while (playAttempts < maxPlayAttempts) {
+                                    try {
+                                        await video.play();
+                                        console.log('iOS Safari: Video play successful');
+                                        break;
+                                    } catch (playError) {
+                                        playAttempts++;
+                                        console.warn(`iOS play attempt ${playAttempts} failed:`, playError);
+                                        
+                                        if (playAttempts >= maxPlayAttempts) {
+                                            throw playError;
+                                        }
+                                        
+                                        await new Promise(resolve => setTimeout(resolve, 200));
+                                    }
+                                }
+                            }
+                            
+                            // Verify video dimensions
+                            if (video.videoWidth === 0 || video.videoHeight === 0) {
+                                throw new Error('Video dimensions are invalid');
+                            }
+                            
+                            console.log(`Video ready: ${video.videoWidth}x${video.videoHeight}`);
+                            resolved = true;
+                            resolve();
+                            
+                        } catch (error) {
+                            console.error('Video initialization error:', error);
+                            resolved = true;
+                            reject(error);
                         }
-                        resolve();
                     };
                     
-                    video.onerror = reject;
+                    // Multiple event listeners for different Safari behaviors
+                    video.addEventListener('loadedmetadata', handleVideoReady);
+                    video.addEventListener('canplay', handleVideoReady);
+                    video.addEventListener('loadeddata', handleVideoReady);
                     
-                    // Timeout fallback
-                    setTimeout(() => {
-                        if (video.readyState === 0) {
-                            reject(new Error('Video loading timeout'));
+                    video.addEventListener('error', (error) => {
+                        if (!resolved) {
+                            resolved = true;
+                            reject(new Error(`Video error: ${error.message || 'Unknown video error'}`));
                         }
-                    }, 10000);
+                    });
+                    
+                    // Extended timeout for Safari
+                    const timeoutMs = isSafari ? 15000 : 10000;
+                    setTimeout(() => {
+                        if (!resolved) {
+                            resolved = true;
+                            reject(new Error(`Video loading timeout after ${timeoutMs}ms`));
+                        }
+                    }, timeoutMs);
                 });
                 
             } catch (error) {
@@ -1401,13 +1509,43 @@
         
         async function loadModel() {
             try {
-                // Explicitly set the backend
-                try {
-                    await tf.setBackend('webgl');
-                    console.log('Using WebGL backend');
-                } catch (e) {
-                    console.warn('WebGL is not supported, falling back to CPU');
-                    await tf.setBackend('cpu');
+                // Safari-specific backend selection
+                let backendSelected = false;
+                
+                if (isSafari) {
+                    console.log('Safari detected - using conservative backend selection');
+                    try {
+                        // Try WebGL with explicit Safari checks
+                        const webglSupported = tf.ENV.getBool('WEBGL_RENDER_FLOAT32_CAPABLE') && 
+                                             tf.ENV.getBool('WEBGL_VERSION') >= 1;
+                        
+                        if (webglSupported) {
+                            await tf.setBackend('webgl');
+                            console.log('Safari: Using WebGL backend');
+                            backendSelected = true;
+                        } else {
+                            throw new Error('WebGL not fully supported in Safari');
+                        }
+                    } catch (e) {
+                        console.warn('Safari: WebGL failed, using CPU backend:', e.message);
+                        await tf.setBackend('cpu');
+                        backendSelected = true;
+                    }
+                } else {
+                    // Non-Safari browsers
+                    try {
+                        await tf.setBackend('webgl');
+                        console.log('Using WebGL backend');
+                        backendSelected = true;
+                    } catch (e) {
+                        console.warn('WebGL is not supported, falling back to CPU');
+                        await tf.setBackend('cpu');
+                        backendSelected = true;
+                    }
+                }
+                
+                if (!backendSelected) {
+                    throw new Error('No suitable TensorFlow backend found');
                 }
 
                 // Wait for the backend to be ready
@@ -1427,22 +1565,59 @@
                     maxFaces = performanceLevel === 'low' ? 1 : (performanceLevel === 'medium' ? 3 : 5);
                 }
                 
-                // Safari-optimized model configuration
+                // Enhanced Safari-optimized model configuration
                 const modelConfig = {
                     maxFaces: maxFaces,
-                    refineLandmarks: !isSafari, // Disable refinement on Safari for better performance
-                    detectionConfidence: isSafari ? 0.7 : 0.5, // Higher confidence threshold for Safari
-                    maxContinuousChecks: isSafari ? 3 : 5, // Reduce continuous checks on Safari
+                    refineLandmarks: false, // Always disable for Safari compatibility
+                    detectionConfidence: isSafari ? 0.8 : 0.5, // Even higher confidence for Safari
+                    maxContinuousChecks: isSafari ? 2 : 5, // Minimal continuous checks for Safari
                     detectorModelUrl: undefined, // Use default
-                    landmarkModelUrl: undefined // Use default
+                    landmarkModelUrl: undefined, // Use default
+                    // Safari-specific performance optimizations
+                    ...(isSafari && {
+                        scoreThreshold: 0.75, // Higher threshold for more reliable detection
+                        iouThreshold: 0.3,    // Lower IoU for less overlap sensitivity
+                        maxVideoSize: isIOS ? 320 : 480 // Smaller video processing size for iOS
+                    })
                 };
                 
                 console.log('Loading model with config:', modelConfig);
                 
-                model = await faceLandmarksDetection.load(
-                    faceLandmarksDetection.SupportedPackages.mediapipeFacemesh,
-                    modelConfig
-                );
+                // Enhanced Safari model loading with multiple fallback attempts
+                let loadAttempts = 0;
+                const maxAttempts = isSafari ? 3 : 1;
+                
+                while (loadAttempts < maxAttempts && !model) {
+                    try {
+                        loadAttempts++;
+                        console.log(`Model loading attempt ${loadAttempts}/${maxAttempts}`);
+                        
+                        if (isSafari && loadAttempts > 1) {
+                            // Progressive degradation for Safari
+                            modelConfig.maxFaces = Math.max(1, Math.floor(modelConfig.maxFaces / 2));
+                            modelConfig.detectionConfidence = Math.min(0.9, modelConfig.detectionConfidence + 0.1);
+                            console.log(`Safari retry: Reduced maxFaces to ${modelConfig.maxFaces}`);
+                        }
+                        
+                        model = await faceLandmarksDetection.load(
+                            faceLandmarksDetection.SupportedPackages.mediapipeFacemesh,
+                            modelConfig
+                        );
+                        
+                        console.log('Model loaded successfully');
+                        break;
+                        
+                    } catch (loadError) {
+                        console.warn(`Model loading attempt ${loadAttempts} failed:`, loadError);
+                        
+                        if (loadAttempts >= maxAttempts) {
+                            throw loadError;
+                        }
+                        
+                        // Wait before retry
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
                 
                 document.getElementById('loading').style.display = 'none';
                 const optimizations = [
@@ -1457,6 +1632,30 @@
                     `Ready! Multi-face filters active - preview only. Performance: ${performanceLevel}. Optimizations: ${optimizations}`;
                     
                 document.getElementById('statusText').textContent = statusMessage;
+                
+                // Additional Safari status information
+                if (isSafari) {
+                    console.log('=== Safari Model Load Success ===');
+                    console.log('Final backend:', tf.getBackend());
+                    console.log('Model max faces:', model.maxFaces || 'Unknown');
+                    console.log('Performance level:', performanceLevel);
+                    console.log('Canvas size:', overlay.width + 'x' + overlay.height);
+                    console.log('Video size:', video.videoWidth + 'x' + video.videoHeight);
+                    console.log('=================================');
+                    
+                    // Log status to page for debugging
+                    setTimeout(() => {
+                        const debugInfo = {
+                            safari: isSafari,
+                            iOS: isIOS,
+                            backend: tf.getBackend(),
+                            performance: performanceLevel,
+                            videoSize: video.videoWidth + 'x' + video.videoHeight,
+                            canvasSize: overlay.width + 'x' + overlay.height
+                        };
+                        console.log('Safari Debug Info:', debugInfo);
+                    }, 1000);
+                }
                 
                 // Safari-specific memory management
                 if (isSafari) {
@@ -1817,14 +2016,56 @@
                 if (shouldDetect) {
                     skipFrameCounter = 0;
                     
-                    // Optimized detection options
-                    const detectionOptions = { 
-                        input: video,
-                        returnTensors: false,
-                        flipHorizontal: false
-                    };
+                    // Safari-enhanced detection with retry logic
+                    let predictions = [];
+                    let detectionAttempts = 0;
+                    const maxDetectionAttempts = isSafari ? 3 : 1;
                     
-                    const predictions = await model.estimateFaces(detectionOptions);
+                    while (detectionAttempts < maxDetectionAttempts) {
+                        detectionAttempts++;
+                        
+                        try {
+                            // Safari-optimized detection options
+                            const detectionOptions = { 
+                                input: video,
+                                returnTensors: false,
+                                flipHorizontal: false,
+                                ...(isSafari && {
+                                    // Additional Safari-specific options
+                                    maxFaces: Math.min(2, model.maxFaces || 2),
+                                    scoreThreshold: 0.8
+                                })
+                            };
+                            
+                            console.log(`Face detection attempt ${detectionAttempts}/${maxDetectionAttempts}`);
+                            predictions = await model.estimateFaces(detectionOptions);
+                            
+                            // Validate predictions for Safari
+                            if (isSafari && predictions.length > 0) {
+                                predictions = predictions.filter(face => {
+                                    // Validate face mesh integrity
+                                    return face.scaledMesh && 
+                                           face.scaledMesh.length > 460 && 
+                                           face.faceInViewConfidence > 0.7;
+                                });
+                            }
+                            
+                            console.log(`Safari: Detected ${predictions.length} valid faces`);
+                            break;
+                            
+                        } catch (detectionError) {
+                            console.warn(`Safari detection attempt ${detectionAttempts} failed:`, detectionError);
+                            
+                            if (detectionAttempts >= maxDetectionAttempts) {
+                                console.error('All face detection attempts failed');
+                                predictions = []; // Use empty array to continue
+                                break;
+                            }
+                            
+                            // Brief pause before retry
+                            await new Promise(resolve => setTimeout(resolve, 50));
+                        }
+                    }
                     
                     if (predictions.length > 0) {
                         // Calculate face movement for adaptive skipping
@@ -1888,12 +2129,42 @@
             } catch (error) {
                 console.error('Detection error:', error);
                 
-                // Error recovery with memory cleanup
+                // Enhanced Safari error recovery
+                if (isSafari) {
+                    console.warn('Safari detection error, applying recovery strategies');
+                    
+                    // Safari-specific error handling
+                    if (error.message.includes('backend') || error.message.includes('WebGL')) {
+                        console.warn('Safari WebGL issue detected, switching to CPU');
+                        try {
+                            await tf.setBackend('cpu');
+                            await tf.ready();
+                        } catch (backendError) {
+                            console.error('Failed to switch to CPU backend:', backendError);
+                        }
+                    }
+                }
+                
+                // Standard error recovery with memory cleanup
                 if (error.message.includes('memory') || error.message.includes('tensor')) {
                     console.warn('Memory error detected, performing cleanup');
                     manageTensorMemory();
                     if (performanceLevel !== 'low') {
                         performanceLevel = 'low';
+                        console.log('Degraded to low performance mode');
+                    }
+                }
+                
+                // Model reinitialization for persistent errors
+                if (frameCount % 300 === 0 && isSafari) { // Every ~10 seconds at 30fps
+                    console.log('Safari: Periodic model health check');
+                    try {
+                        // Test model with dummy input
+                        await model.estimateFaces({ input: video, returnTensors: false });
+                    } catch (modelError) {
+                        console.warn('Model appears unhealthy, may need reinitialization');
+                        document.getElementById('statusText').textContent = 
+                            'Safari: Performance issues detected. Consider refreshing.';
                     }
                 }
                 
@@ -2027,13 +2298,40 @@
         
         async function init() {
             try {
-                // Safari diagnostic information
+                // Enhanced Safari diagnostic information
                 if (isSafari) {
-                    console.log('=== Safari Multi-Face Detection Diagnostics ===');
+                    console.log('=== ENHANCED Safari Multi-Face Detection Diagnostics ===');
                     console.log('User Agent:', navigator.userAgent);
                     console.log('Is iOS:', isIOS);
+                    console.log('Is Mobile:', isMobile);
+                    console.log('Screen dimensions:', window.screen.width + 'x' + window.screen.height);
+                    console.log('Viewport dimensions:', window.innerWidth + 'x' + window.innerHeight);
+                    console.log('Device pixel ratio:', window.devicePixelRatio);
                     console.log('TensorFlow.js version:', tf?.version || 'Not loaded');
-                    console.log('Available backends:', tf?.getBackend ? tf.getBackend() : 'Unknown');
+                    
+                    // Test WebGL support
+                    const canvas = document.createElement('canvas');
+                    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                    console.log('WebGL support:', !!gl);
+                    if (gl) {
+                        console.log('WebGL vendor:', gl.getParameter(gl.VENDOR));
+                        console.log('WebGL renderer:', gl.getParameter(gl.RENDERER));
+                        console.log('WebGL version:', gl.getParameter(gl.VERSION));
+                    }
+                    
+                    // Test getUserMedia support
+                    console.log('getUserMedia support:', !!(navigator.mediaDevices?.getUserMedia || navigator.webkitGetUserMedia));
+                    
+                    // Memory information if available
+                    if (navigator.deviceMemory) {
+                        console.log('Device memory:', navigator.deviceMemory, 'GB');
+                    }
+                    
+                    // Safari version detection
+                    const safariVersion = navigator.userAgent.match(/Version\/(\d+)/);
+                    if (safariVersion) {
+                        console.log('Safari version:', safariVersion[1]);
+                    }
                 }
                 
                 // Detect device performance first
@@ -2050,7 +2348,20 @@
                 overlay = document.getElementById('overlay');
                 overlay.width = video.videoWidth;
                 overlay.height = video.videoHeight;
-                ctx = overlay.getContext('2d', { willReadFrequently: true });
+                // Safari-optimized canvas context
+                const canvasOptions = isSafari ? 
+                    { 
+                        willReadFrequently: true, 
+                        alpha: true,
+                        desynchronized: false // Disable for Safari stability
+                    } : 
+                    { 
+                        willReadFrequently: true, 
+                        alpha: true,
+                        desynchronized: true 
+                    };
+                    
+                ctx = overlay.getContext('2d', canvasOptions);
                 
                 // Safari-specific canvas optimizations
                 if (isSafari) {
