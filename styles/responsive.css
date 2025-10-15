@@ -1,0 +1,145 @@
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+    .controls {
+        gap: 12px;
+        padding: 12px 20px;
+        bottom: 30px;
+        padding-bottom: calc(30px + env(safe-area-inset-bottom, 25px));
+    }
+
+    .filter-btn {
+        width: 48px;
+        height: 48px;
+        min-width: 48px;
+        min-height: 48px;
+        font-size: 18px;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: rgba(255,255,255,0.2);
+    }
+
+    .capture-btn {
+        width: 64px;
+        height: 64px;
+        min-width: 64px;
+        min-height: 64px;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: rgba(255,255,255,0.1);
+    }
+
+    .info {
+        top: 10px;
+        right: 10px;
+        left: 10px;
+        max-width: none;
+        font-size: 12px;
+        padding: 10px;
+    }
+
+    .status {
+        top: 10px;
+        font-size: 12px;
+        padding: 8px 16px;
+    }
+
+    .camera-container {
+        margin: 10px;
+        max-width: calc(100vw - 20px);
+    }
+
+    #capturedImage {
+        width: 100px;
+        bottom: 120px;
+        right: 10px;
+    }
+}
+
+/* Tablet responsive styles */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .controls {
+        gap: 18px;
+        padding: 18px 30px;
+    }
+
+    .filter-btn {
+        width: 60px;
+        height: 60px;
+        min-width: 60px;
+        min-height: 60px;
+        font-size: 24px;
+    }
+
+    .capture-btn {
+        width: 80px;
+        height: 80px;
+        min-width: 80px;
+        min-height: 80px;
+    }
+
+    .info {
+        max-width: 300px;
+        font-size: 15px;
+        padding: 18px;
+    }
+
+    .status {
+        font-size: 16px;
+        padding: 12px 24px;
+    }
+
+    #capturedImage {
+        width: 180px;
+        bottom: 140px;
+    }
+}
+
+/* Landscape mode optimizations */
+@media (orientation: landscape) and (max-height: 500px) {
+    .info {
+        top: 5px;
+        right: 5px;
+        left: 5px;
+        font-size: 11px;
+        padding: 8px;
+        max-width: 200px;
+    }
+
+    .status {
+        top: 5px;
+        font-size: 11px;
+        padding: 6px 12px;
+    }
+
+    .controls {
+        bottom: 15px;
+        padding: 8px 16px;
+        padding-bottom: calc(15px + env(safe-area-inset-bottom, 10px));
+        gap: 8px;
+        margin-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    .filter-btn {
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+        min-height: 40px;
+        font-size: 16px;
+        padding: 2px;
+    }
+
+    .capture-btn {
+        width: 50px;
+        height: 50px;
+        min-width: 50px;
+        min-height: 50px;
+    }
+
+    #capturedImage {
+        width: 80px;
+        bottom: 80px;
+        right: 5px;
+    }
+
+    .camera-container {
+        margin: 5px;
+    }
+}

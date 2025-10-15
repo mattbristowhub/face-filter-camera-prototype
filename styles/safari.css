@@ -1,0 +1,86 @@
+/* Safari-specific styles and fixes */
+
+/* Safari interface visibility states */
+body.safari-interface-visible .controls {
+    bottom: 45px !important;
+    padding-bottom: calc(45px + env(safe-area-inset-bottom, 35px)) !important;
+}
+
+/* Safari tab bar specific adjustments */
+body.safari-tab-bar-visible .controls {
+    bottom: 55px !important;
+    padding-bottom: calc(55px + env(safe-area-inset-bottom, 40px)) !important;
+    margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px) !important;
+}
+
+/* Fallback positioning for unsupported browsers */
+@supports not (padding: env(safe-area-inset-bottom)) {
+    .controls {
+        bottom: 40px !important;
+        padding-bottom: 40px !important;
+    }
+
+    @media (max-width: 768px) {
+        .controls {
+            bottom: 50px !important;
+            padding-bottom: 50px !important;
+        }
+    }
+}
+
+/* Safari-specific enhancements */
+@supports (-webkit-touch-callout: none) {
+    /* Prevent Safari from interfering with controls */
+    .controls {
+        -webkit-transform: translateX(-50%);
+        -webkit-backface-visibility: hidden;
+        backface-visibility: hidden;
+        will-change: transform;
+    }
+
+    /* Enhanced scrolling for filter selector */
+    .filter-selector {
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+
+    .filter-selector::-webkit-scrollbar {
+        display: none;
+    }
+}
+
+/* Safari mobile specific adjustments */
+@supports (-webkit-touch-callout: none) {
+    .controls {
+        bottom: 35px;
+        padding-bottom: calc(35px + env(safe-area-inset-bottom, 25px));
+        margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+    }
+}
+
+/* iOS Safari specific mobile adjustments */
+@supports (-webkit-touch-callout: none) {
+    @media (max-width: 768px) {
+        .controls {
+            bottom: 40px;
+            padding-bottom: calc(40px + env(safe-area-inset-bottom, 30px));
+            margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 15px);
+        }
+    }
+}
+
+/* Safari landscape specific adjustments */
+@supports (-webkit-touch-callout: none) {
+    @media (orientation: landscape) and (max-height: 500px) {
+        .controls {
+            bottom: 25px;
+            padding-bottom: calc(25px + env(safe-area-inset-bottom, 15px));
+            margin-bottom: calc(env(safe-area-inset-bottom, 0px) + 5px);
+        }
+
+        #capturedImage {
+            bottom: 90px;
+        }
+    }
+}
