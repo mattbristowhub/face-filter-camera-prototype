@@ -3,7 +3,7 @@
  * Handles performance detection, monitoring, and adaptive quality adjustments
  */
 
-import { PERFORMANCE, PERFORMANCE_DETECTION, MEMORY, TRACKING } from '../../config/constants.js';
+import { PERFORMANCE, PERFORMANCE_DETECTION, MEMORY, TRACKING } from '../config/constants.js';
 import { browserDetector } from '../utils/browserDetection.js';
 import { mathUtils } from '../utils/mathUtils.js';
 

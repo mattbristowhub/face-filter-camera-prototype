@@ -3,7 +3,7 @@
  * Pre-calculated lookup tables for fast trigonometric operations
  */
 
-import { MATH } from '../../config/constants.js';
+import { MATH } from '../config/constants.js';
 
 class MathUtils {
   constructor() {

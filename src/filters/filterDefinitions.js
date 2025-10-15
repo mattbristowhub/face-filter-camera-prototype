@@ -3,7 +3,7 @@
  * Configuration for all available filters
  */
 
-import { COLORS, ORBIT_SPEEDS } from '../../config/constants.js';
+import { COLORS, ORBIT_SPEEDS } from '../config/constants.js';
 
 export const filterDefinitions = {
   bouncing_balls: {

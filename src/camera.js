@@ -3,7 +3,7 @@
  * Handles camera initialization and stream management
  */
 
-import { CAMERA_CONFIG } from '../config/constants.js';
+import { CAMERA_CONFIG } from './config/constants.js';
 import { browserDetector } from './utils/browserDetection.js';
 
 export class Camera {

@@ -3,7 +3,7 @@
  * Handles TensorFlow.js tensor cleanup and memory management
  */
 
-import { MEMORY, SAFARI_CONFIG } from '../../config/constants.js';
+import { MEMORY, SAFARI_CONFIG } from '../config/constants.js';
 import { browserDetector } from '../utils/browserDetection.js';
 
 export class MemoryManager {

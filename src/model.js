@@ -3,7 +3,7 @@
  * Handles TensorFlow.js and MediaPipe Face Mesh model loading
  */
 
-import { SAFARI_CONFIG, PERFORMANCE } from '../config/constants.js';
+import { SAFARI_CONFIG, PERFORMANCE } from './config/constants.js';
 import { browserDetector } from './utils/browserDetection.js';
 
 export class ModelLoader {

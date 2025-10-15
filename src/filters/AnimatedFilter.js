@@ -4,7 +4,7 @@
  */
 
 import { Filter } from './Filter.js';
-import { ANIMATION, FILTER_SIZES, CULLING } from '../../config/constants.js';
+import { ANIMATION, FILTER_SIZES, CULLING } from '../config/constants.js';
 import { mathUtils } from '../utils/mathUtils.js';
 import { getFacePoints, getFaceDimensions, isInViewport } from '../utils/viewportUtils.js';
 

@@ -3,6 +3,8 @@
  * Centralizes all browser/device detection logic
  */
 
+import { CAMERA_CONFIG } from '../config/constants.js';
+
 class BrowserDetector {
   constructor() {
     this.userAgent = navigator.userAgent;
@@ -74,7 +76,7 @@ class BrowserDetector {
    * @returns {number} Timeout in milliseconds
    */
   getCameraTimeout() {
-    const { SAFARI_TIMEOUT_MS, DEFAULT_TIMEOUT_MS } = require('../../config/constants').CAMERA_CONFIG;
+    const { SAFARI_TIMEOUT_MS, DEFAULT_TIMEOUT_MS } = CAMERA_CONFIG;
     return this.isSafari ? SAFARI_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
   }
 
@@ -83,8 +85,7 @@ class BrowserDetector {
    * @returns {object} MediaStream constraints
    */
   getCameraConstraints() {
-    const { DEFAULT_CONSTRAINTS, SAFARI_CONSTRAINTS, IOS_CONSTRAINTS } =
-      require('../../config/constants').CAMERA_CONFIG;
+    const { DEFAULT_CONSTRAINTS, SAFARI_CONSTRAINTS, IOS_CONSTRAINTS } = CAMERA_CONFIG;
 
     if (this.isIOS) {
       return IOS_CONSTRAINTS;

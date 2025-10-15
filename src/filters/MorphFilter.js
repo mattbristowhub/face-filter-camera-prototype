@@ -4,7 +4,7 @@
  */
 
 import { Filter } from './Filter.js';
-import { MORPH, LANDMARKS } from '../../config/constants.js';
+import { MORPH, LANDMARKS } from '../config/constants.js';
 import { bilinearSample, getFacePoints, getFaceDimensions } from '../utils/viewportUtils.js';
 
 export class MorphFilter extends Filter {

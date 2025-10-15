@@ -3,7 +3,7 @@
  * Functions for viewport checks and animation culling
  */
 
-import { CULLING } from '../../config/constants.js';
+import { CULLING, LANDMARKS } from '../config/constants.js';
 
 /**
  * Check if a point with radius is within viewport
@@ -40,7 +40,6 @@ export function shouldCullAnimation(face, canvasWidth, canvasHeight) {
  * @returns {object}
  */
 export function getFacePoints(face) {
-  const { LANDMARKS } = require('../../config/constants.js');
   const mesh = face.scaledMesh;
 
   return {
