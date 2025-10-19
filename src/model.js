@@ -144,7 +144,7 @@ export class ModelLoader {
         }
 
         model = await this.faceLandmarksDetection.load(
-          this.faceLandmarksDetection.SupportedPackages.mediapipeFacemesh,
+          this.faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
           modelConfig
         );
 
@@ -197,12 +197,7 @@ export class ModelLoader {
         return await this.detectFacesSafari(video);
       }
 
-      return await this.model.estimateFaces({
-        input: video,
-        returnTensors: false,
-        flipHorizontal: false,
-        predictIrises: false
-      });
+      return await this.model.estimateFaces(video, false);
     } catch (error) {
       return [];
     }
@@ -218,12 +213,7 @@ export class ModelLoader {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const faces = await this.model.estimateFaces({
-          input: video,
-          returnTensors: false,
-          flipHorizontal: false,
-          predictIrises: false
-        });
+        const faces = await this.model.estimateFaces(video, false);
 
         // Validate face mesh integrity
         if (faces && faces.length > 0) {
