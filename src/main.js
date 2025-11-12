@@ -163,9 +163,6 @@ export class FaceFilterApp {
         // Perform face detection
         faces = await this.modelLoader.detectFaces(this.video);
 
-        // Calculate face movement
-        const movement = this.performanceManager.calculateFaceMovement(faces);
-
         // Cache faces for interpolation
         this.performanceManager.cachedFaces = faces;
       } else {

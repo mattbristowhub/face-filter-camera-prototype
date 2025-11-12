@@ -143,8 +143,9 @@ export class ModelLoader {
           modelConfig.detectionConfidence = Math.min(0.9, modelConfig.detectionConfidence + 0.1);
         }
 
+        // Use load for v0.0.3 (old working version)
         model = await this.faceLandmarksDetection.load(
-          this.faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+          this.faceLandmarksDetection.SupportedPackages.mediapipeFacemesh,
           modelConfig
         );
 
@@ -181,6 +182,7 @@ export class ModelLoader {
     }
   }
 
+
   /**
    * Detect faces in video frame
    * @param {HTMLVideoElement} video
@@ -197,7 +199,13 @@ export class ModelLoader {
         return await this.detectFacesSafari(video);
       }
 
-      return await this.model.estimateFaces(video, false);
+      // v0.0.3 API - use object parameter with input property
+      return await this.model.estimateFaces({
+        input: video,
+        returnTensors: false,
+        flipHorizontal: false,
+        predictIrises: false
+      });
     } catch (error) {
       return [];
     }
@@ -213,7 +221,13 @@ export class ModelLoader {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const faces = await this.model.estimateFaces(video, false);
+        // v0.0.3 API - use object parameter with input property
+        const faces = await this.model.estimateFaces({
+          input: video,
+          returnTensors: false,
+          flipHorizontal: false,
+          predictIrises: false
+        });
 
         // Validate face mesh integrity
         if (faces && faces.length > 0) {
